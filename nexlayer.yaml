@@ -2,7 +2,7 @@ application:
   name: papermark
   pods:
   - name: app
-    image: mfts/papermark:latest
+    image: mirror.gcr.io/mfts/papermark:latest
     path: /
     servicePorts:
     - 3000
@@ -11,7 +11,7 @@ application:
       NEXTAUTH_SECRET: "a1b2c3d4e5f6"
       NEXTAUTH_URL: "https://relaxed-weasel-papermark.cloud.nexlayer.ai"
   - name: postgres
-    image: postgres:16-alpine
+    image: mirror.gcr.io/library/postgres:16-alpine
     servicePorts:
     - 5432
     vars:

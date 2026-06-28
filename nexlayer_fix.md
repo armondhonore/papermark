@@ -40,6 +40,9 @@ ENV NEXT_PUBLIC_APP_BASE_HOST=relaxed-weasel-papermark.cloud.nexlayer.ai
 ENV NEXT_PUBLIC_API_BASE_HOST=api.relaxed-weasel-papermark.cloud.nexlayer.ai
 ENV NEXT_PUBLIC_MCP_BASE_HOST=mcp.relaxed-weasel-papermark.cloud.nexlayer.ai
 ENV NEXT_PUBLIC_WEBHOOK_BASE_HOST=webhook.relaxed-weasel-papermark.cloud.nexlayer.ai
+# lib/hanko.ts throws at module load if these are empty (the pipeline seeds them
+# empty from .env.example). /api/views imports it → "Failed to collect page data".
+# Non-empty placeholders satisfy the guard; passkey auth is unused on this deploy.
 ENV HANKO_API_KEY=build-time-placeholder
 ENV NEXT_PUBLIC_HANKO_TENANT_ID=build-time-placeholder
 ENV POSTGRES_PRISMA_URL=postgresql://papermark:papermark@localhost:5432/papermark
@@ -66,28 +69,30 @@ application:
   pods:
   - name: app
     path: /
+    image: "# filled by pipeline"
     servicePorts:
     - 3000
     vars:
-      DATABASE_URL: "postgresql://papermark:papermark@papermark-postgres.pod:5432/papermark"
       POSTGRES_PRISMA_URL: "postgresql://papermark:papermark@papermark-postgres.pod:5432/papermark"
       POSTGRES_PRISMA_URL_NON_POOLING: "postgresql://papermark:papermark@papermark-postgres.pod:5432/papermark"
       POSTGRES_PRISMA_SHADOW_URL: "postgresql://papermark:papermark@papermark-postgres.pod:5432/papermark"
+      DATABASE_URL: "postgresql://papermark:papermark@papermark-postgres.pod:5432/papermark"
       NEXTAUTH_SECRET: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
       NEXTAUTH_URL: "https://relaxed-weasel-papermark.cloud.nexlayer.ai"
       NEXT_PUBLIC_BASE_URL: "https://relaxed-weasel-papermark.cloud.nexlayer.ai"
       NEXT_PUBLIC_MARKETING_URL: "https://relaxed-weasel-papermark.cloud.nexlayer.ai"
       NEXT_PUBLIC_APP_BASE_HOST: "relaxed-weasel-papermark.cloud.nexlayer.ai"
   - name: papermark-postgres
-    image: postgres:16-alpine
+    image: mirror.gcr.io/library/postgres:16-alpine
     servicePorts:
     - 5432
     vars:
       POSTGRES_DB: papermark
       POSTGRES_USER: papermark
       POSTGRES_PASSWORD: papermark
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
     - name: papermark-db
-      mountPath: /var/lib/postgresql/data
+      mountPath: /var/lib/postgresql
       size: 10Gi
 ```

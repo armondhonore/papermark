@@ -1,30 +1,38 @@
-FROM node:24-alpine AS deps
+FROM node:18-alpine AS deps
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma
-# npm ci runs postinstall (prisma generate); skip if network-fragile by forcing legacy peer deps
-RUN npm ci --legacy-peer-deps
+RUN npm ci --legacy-peer-deps --no-audit --no-fund
 
-FROM node:24-alpine AS builder
+FROM node:18-alpine AS builder
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_OPTIONS=--max-old-space-size=4096
-# Provide build-time placeholders so module-load env reads don't break the build
+# Build-time placeholders. next.config.mjs has[].host rules require a value, so
+# every *_BASE_HOST referenced there MUST be set or `next build` aborts with
+# "Invalid `has` item: value is required for host type".
 ENV NEXTAUTH_SECRET=build-time-placeholder
 ENV NEXTAUTH_URL=http://localhost:3000
 ENV NEXT_PUBLIC_BASE_URL=http://localhost:3000
-RUN npm run build
+ENV NEXT_PUBLIC_MARKETING_URL=http://localhost:3000
+ENV NEXT_PUBLIC_APP_BASE_HOST=relaxed-weasel-papermark.cloud.nexlayer.ai
+ENV NEXT_PUBLIC_API_BASE_HOST=api.relaxed-weasel-papermark.cloud.nexlayer.ai
+ENV NEXT_PUBLIC_MCP_BASE_HOST=mcp.relaxed-weasel-papermark.cloud.nexlayer.ai
+ENV POSTGRES_PRISMA_URL=postgresql://papermark:papermark@localhost:5432/papermark
+ENV POSTGRES_PRISMA_URL_NON_POOLING=postgresql://papermark:papermark@localhost:5432/papermark
+RUN npx prisma generate && npm run build
 
-FROM node:24-alpine AS runner
+FROM node:18-alpine AS runner
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 COPY --from=builder /app ./
 EXPOSE 3000
-# Run prisma migrations against the provisioned Postgres, then start Next.js.
 CMD sh -c "npx prisma migrate deploy || npx prisma db push --accept-data-loss; npm run start"

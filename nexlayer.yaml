@@ -2,15 +2,20 @@ application:
   name: papermark
   pods:
   - name: app
-    image: mirror.gcr.io/mfts/papermark:latest
     path: /
     servicePorts:
     - 3000
     vars:
-      DATABASE_URL: "postgresql://papermark:papermark@postgres.pod:5432/papermark"
+      POSTGRES_PRISMA_URL: "postgresql://papermark:papermark@papermark-postgres.pod:5432/papermark"
+      POSTGRES_PRISMA_URL_NON_POOLING: "postgresql://papermark:papermark@papermark-postgres.pod:5432/papermark"
+      POSTGRES_PRISMA_SHADOW_URL: "postgresql://papermark:papermark@papermark-postgres.pod:5432/papermark"
+      DATABASE_URL: "postgresql://papermark:papermark@papermark-postgres.pod:5432/papermark"
       NEXTAUTH_SECRET: "a1b2c3d4e5f6"
       NEXTAUTH_URL: "https://relaxed-weasel-papermark.cloud.nexlayer.ai"
-  - name: postgres
+      NEXT_PUBLIC_BASE_URL: "https://relaxed-weasel-papermark.cloud.nexlayer.ai"
+      NEXT_PUBLIC_MARKETING_URL: "https://relaxed-weasel-papermark.cloud.nexlayer.ai"
+      NEXT_PUBLIC_APP_BASE_HOST: "relaxed-weasel-papermark.cloud.nexlayer.ai"
+  - name: papermark-postgres
     image: mirror.gcr.io/library/postgres:16-alpine
     servicePorts:
     - 5432

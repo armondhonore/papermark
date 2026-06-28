@@ -1,5 +1,7 @@
 FROM node:18-alpine AS deps
-RUN apk add --no-cache libc6-compat openssl
+# better-sqlite3 (and other native deps) compile via node-gyp, which needs
+# python3 + a C/C++ toolchain. node:18-alpine ships none → "gyp ERR! find Python".
+RUN apk add --no-cache libc6-compat openssl python3 make g++ py3-setuptools
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma

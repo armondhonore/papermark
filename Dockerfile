@@ -25,6 +25,11 @@ ENV NEXT_PUBLIC_APP_BASE_HOST=relaxed-weasel-papermark.cloud.nexlayer.ai
 ENV NEXT_PUBLIC_API_BASE_HOST=api.relaxed-weasel-papermark.cloud.nexlayer.ai
 ENV NEXT_PUBLIC_MCP_BASE_HOST=mcp.relaxed-weasel-papermark.cloud.nexlayer.ai
 ENV NEXT_PUBLIC_WEBHOOK_BASE_HOST=webhook.relaxed-weasel-papermark.cloud.nexlayer.ai
+# lib/hanko.ts throws at module load if these are empty (the pipeline seeds them
+# empty from .env.example). /api/views imports it → "Failed to collect page data".
+# Non-empty placeholders satisfy the guard; passkey auth is unused on this deploy.
+ENV HANKO_API_KEY=build-time-placeholder
+ENV NEXT_PUBLIC_HANKO_TENANT_ID=build-time-placeholder
 ENV POSTGRES_PRISMA_URL=postgresql://papermark:papermark@localhost:5432/papermark
 ENV POSTGRES_PRISMA_URL_NON_POOLING=postgresql://papermark:papermark@localhost:5432/papermark
 RUN npx prisma generate && npm run build

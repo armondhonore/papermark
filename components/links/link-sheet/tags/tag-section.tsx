@@ -1,20 +1,17 @@
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { Dispatch, SetStateAction, useMemo, useState } from "react";
 
-import { PlanEnum } from "@/ee/stripe/constants";
-import { CircleHelpIcon, Tag } from "lucide-react";
+import { Tag } from "lucide-react";
 import { toast } from "sonner";
 import { mutate } from "swr";
 
-import { usePlan } from "@/lib/swr/use-billing";
 import { useTags } from "@/lib/swr/use-tags";
 import { TagProps } from "@/lib/types";
 
-import { UpgradePlanModal } from "@/components/billing/upgrade-plan-modal";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { MultiSelect } from "@/components/ui/multi-select-v2";
-import { BadgeTooltip } from "@/components/ui/tooltip";
 
 import { DEFAULT_LINK_TYPE } from "..";
 
@@ -35,21 +32,25 @@ function getTagOption(tag: TagProps) {
 export default function TagSection({
   data,
   setData,
+  editLink,
   teamId,
 }: {
   data: DEFAULT_LINK_TYPE;
   setData: Dispatch<SetStateAction<DEFAULT_LINK_TYPE>>;
+  editLink?: boolean;
   teamId: string;
 }) {
+  const router = useRouter();
+  // TODO
+  // const [searchQuery, setSearchQuery] = useState<string>("");
+  // const [currentPage, setCurrentPage] = useState(1);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [selectedValues, setSelectedValues] = useState<string[]>(
     data.tags || [],
   );
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const { isFree } = usePlan();
 
   const {
-    tagCount,
+    // tagCount,
     tags: availableTags,
     loading: loadingTags,
   } = useTags({
@@ -74,12 +75,6 @@ export default function TagSection({
   };
 
   const createTag = async (tag: string) => {
-    if (isFree && tagCount && tagCount >= 5) {
-      setShowUpgradeModal(true);
-      toast.error("You have reached the maximum number of tags.");
-      return false;
-    }
-
     const res = await fetch(`/api/teams/${teamId}/tags`, {
       method: "POST",
       headers: {
@@ -114,21 +109,13 @@ export default function TagSection({
   return (
     <>
       <div className="flex justify-between">
-        <div className="flex items-center gap-2">
-          <Label htmlFor="link-domain">Tags</Label>
-          <BadgeTooltip
-            content="Group links by tags to organize and track performance"
-            link="https://www.papermark.com/help/article/tag-links"
-          >
-            <CircleHelpIcon className="h-4 w-4 shrink-0 text-muted-foreground hover:text-foreground" />
-          </BadgeTooltip>
-        </div>
-        <Link
+        <Label htmlFor="link-domain">Tags</Label>
+        <a
           href={`/settings/tags`}
-          className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+          className="text-xs text-muted-foreground hover:text-foreground"
         >
           Manage
-        </Link>
+        </a>
       </div>
       <div className="flex">
         <MultiSelect
@@ -144,14 +131,6 @@ export default function TagSection({
           onCreate={(search) => createTag(search)}
         />
       </div>
-      {showUpgradeModal && (
-        <UpgradePlanModal
-          clickedPlan={PlanEnum.Pro}
-          trigger="create_tag"
-          open={showUpgradeModal}
-          setOpen={setShowUpgradeModal}
-        />
-      )}
     </>
   );
 }

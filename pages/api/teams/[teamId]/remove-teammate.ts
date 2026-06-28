@@ -2,7 +2,6 @@ import { NextApiRequest, NextApiResponse } from "next";
 
 import { getServerSession } from "next-auth";
 
-import { revokeUserBoundTeamTokens } from "@/lib/api/auth/restricted-tokens";
 import { errorhandler } from "@/lib/errorHandler";
 import prisma from "@/lib/prisma";
 import { CustomUser } from "@/lib/types";
@@ -26,79 +25,28 @@ export default async function handle(
     const { userToBeDeleted } = req.body;
 
     try {
-      const userTeam = await prisma.userTeam.findUnique({
+      const userTeam = await prisma.userTeam.findFirst({
         where: {
-          userId_teamId: {
-            userId,
-            teamId,
-          },
+          teamId,
         },
       });
 
       if (!userTeam) {
-        return res.status(401).json("Unauthorized");
+        return res.status(401).json("The teammate isn't the part of this team");
       }
 
-      const isSelfRemoval = userTeam.userId === userToBeDeleted;
-
-      if (!isSelfRemoval && userTeam.role !== "ADMIN") {
-        return res.status(403).json("Only admins can remove teammates");
+      if (userTeam?.role === "ADMIN" && userTeam.userId === userToBeDeleted) {
+        return res.status(401).json("You can't remove the Admin");
       }
 
-      if (isSelfRemoval && userTeam.role === "ADMIN") {
-        const adminCount = await prisma.userTeam.count({
-          where: {
-            teamId,
-            role: "ADMIN",
-          },
-        });
-
-        if (adminCount <= 1) {
-          return res.status(403).json("You can't remove the last admin");
-        }
-      }
-
-      await Promise.all([
-        // update all documents owned by the user to be deleted to be owned by the team
-        prisma.document.updateMany({
-          where: {
-            teamId,
-            ownerId: userToBeDeleted,
-          },
-          data: {
-            ownerId: null,
-          },
-        }),
-        // update all links owned by the user to have no owner
-        prisma.link.updateMany({
-          where: {
-            teamId,
-            ownerId: userToBeDeleted,
-          },
-          data: {
-            ownerId: null,
-          },
-        }),
-        revokeUserBoundTeamTokens(userToBeDeleted, teamId),
-        // remove any dataroom-scoped assignments for this user in this team
-        // (UserDataroom has no FK to UserTeam, so it isn't covered by cascade)
-        prisma.userDataroom.deleteMany({
-          where: {
+      await prisma.userTeam.delete({
+        where: {
+          userId_teamId: {
             userId: userToBeDeleted,
             teamId,
           },
-        }),
-        // delete the user from the team
-        prisma.userTeam.delete({
-          where: {
-            userId_teamId: {
-              userId: userToBeDeleted,
-              teamId,
-            },
-          },
-        }),
-      ]);
-
+        },
+      });
       return res.status(204).end();
     } catch (error) {
       errorhandler(error, res);

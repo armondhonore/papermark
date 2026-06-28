@@ -2,10 +2,8 @@ import { useRouter } from "next/router";
 
 import { useState } from "react";
 
+import { usePlausible } from "next-plausible";
 import { toast } from "sonner";
-import { mutate } from "swr";
-
-import { Team } from "@/lib/types";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -20,13 +18,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-interface AddTeamModalProps {
-  children: React.ReactNode;
-  setCurrentTeam: (team: Team) => void;
-}
-
-export function AddTeamModal({ children, setCurrentTeam }: AddTeamModalProps) {
+export function AddTeamModal({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const plausible = usePlausible();
   const [teamName, setTeamName] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -53,10 +47,7 @@ export function AddTeamModal({ children, setCurrentTeam }: AddTeamModalProps) {
       toast.error(error);
       return;
     }
-    const data = await response.json();
-    mutate("/api/teams");
-    localStorage.setItem("currentTeamId", data.id);
-    setCurrentTeam(data);
+
     toast.success("Team created successfully!");
     router.push("/documents");
     setLoading(false);

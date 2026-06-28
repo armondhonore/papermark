@@ -5,9 +5,6 @@ import { useState } from "react";
 import { useTeam } from "@/context/team-context";
 import { toast } from "sonner";
 
-import { moveDataroomDocumentToFolder } from "@/lib/documents/move-dataroom-documents";
-import { moveDataroomFolderToFolder } from "@/lib/documents/move-dataroom-folders";
-
 import { SidebarFolderTreeSelection } from "@/components/datarooms/folders";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +15,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+import { moveDataroomDocumentToFolder } from "@/lib/documents/move-dataroom-documents";
+import { moveDataroomFolderToFolder } from "@/lib/documents/move-dataroom-folders";
 
 import { TSelectedFolder } from "../documents/move-folder-modal";
 
@@ -110,7 +110,7 @@ export function MoveToDataroomFolderModal({
           <DialogDescription>Move your item to a folder.</DialogDescription>
         </DialogHeader>
         <form>
-          <div className="mb-2 max-h-[75vh] overflow-x-hidden overflow-y-scroll">
+          <div className="mb-2 max-h-[75vh] overflow-y-scroll">
             <SidebarFolderTreeSelection
               dataroomId={dataroomId}
               selectedFolder={selectedFolder}
@@ -133,9 +133,7 @@ export function MoveToDataroomFolderModal({
               ) : (
                 <>
                   Move to{" "}
-                  <span className="max-w-[200px] truncate font-medium">
-                    {selectedFolder.name}
-                  </span>
+                  <span className="font-medium">{selectedFolder.name}</span>
                 </>
               )}
             </Button>

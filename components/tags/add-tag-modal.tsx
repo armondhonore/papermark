@@ -54,7 +54,7 @@ export function AddTagsModal({
   >;
   handleSubmit: FormEventHandler<HTMLFormElement> | undefined;
 }) {
-  const { isFree, isTrial } = usePlan();
+  const { isFree } = usePlan();
   const initialValues = useRef(tagForm);
 
   useMemo(() => {
@@ -75,10 +75,7 @@ export function AddTagsModal({
   if (isFree && tagCount >= 5) {
     if (children) {
       return (
-        <UpgradePlanModal
-          clickedPlan={isTrial ? PlanEnum.Business : PlanEnum.Pro}
-          trigger={"create_tag"}
-        >
+        <UpgradePlanModal clickedPlan={PlanEnum.Pro} trigger={"create_tag"}>
           <Button>Upgrade to Create Tags</Button>
         </UpgradePlanModal>
       );
@@ -99,7 +96,7 @@ export function AddTagsModal({
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader className="text-start">
-          <DialogTitle>{tagForm.id ? "Edit Tag" : "Create Tag"}</DialogTitle>
+          <DialogTitle>{tagForm.id ? "Create Tag" : "Edit Tag"}</DialogTitle>
           <DialogDescription>
             Organize your links with tags for easy categorization and search.
           </DialogDescription>

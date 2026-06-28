@@ -17,7 +17,6 @@ export default function EmailAuthenticationSection({
     state,
     trigger,
     plan,
-    highlightItem,
   }: LinkUpgradeOptions) => void;
 }) {
   const { emailProtected, emailAuthenticated, enableConversation } = data;
@@ -55,7 +54,6 @@ export default function EmailAuthenticationSection({
             state: true,
             trigger: "link_sheet_email_auth_section",
             plan: "Business",
-            highlightItem: ["email-verify"],
           })
         }
       />

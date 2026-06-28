@@ -4,9 +4,6 @@ import { useTeam } from "@/context/team-context";
 import { CircleHelpIcon } from "lucide-react";
 import { mutate } from "swr";
 
-import { usePlan } from "@/lib/swr/use-billing";
-import { useDomains } from "@/lib/swr/use-domains";
-
 import { AddDomainModal } from "@/components/domains/add-domain-modal";
 import DomainCard from "@/components/domains/domain-card";
 import AppLayout from "@/components/layouts/app";
@@ -14,10 +11,11 @@ import { SettingsHeader } from "@/components/settings/settings-header";
 import { Button } from "@/components/ui/button";
 import { BadgeTooltip } from "@/components/ui/tooltip";
 
+import { useDomains } from "@/lib/swr/use-domains";
+
 export default function Domains() {
-  const { domains } = useDomains({ enabled: true });
+  const { domains } = useDomains();
   const teamInfo = useTeam();
-  const { isBusiness, isDatarooms } = usePlan();
 
   const [open, setOpen] = useState<boolean>(false);
 
@@ -77,8 +75,6 @@ export default function Domains() {
                     <DomainCard
                       domain={domain.slug}
                       isDefault={domain.isDefault}
-                      redirectUrl={domain.redirectUrl}
-                      redirectsAllowed={isBusiness || isDatarooms}
                       onDelete={handleDomainDeletion}
                     />
                   </li>

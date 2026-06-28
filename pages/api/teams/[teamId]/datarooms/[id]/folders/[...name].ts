@@ -5,7 +5,6 @@ import { getServerSession } from "next-auth/next";
 
 import prisma from "@/lib/prisma";
 import { CustomUser } from "@/lib/types";
-import { folderPathSchema } from "@/lib/zod/schemas/folders";
 
 export default async function handle(
   req: NextApiRequest,
@@ -25,17 +24,7 @@ export default async function handle(
       name,
     } = req.query as { teamId: string; id: string; name: string[] };
 
-    // Validate that name is an array of strings using shared Zod schema
-    const nameValidation = folderPathSchema.safeParse(name);
-    if (!nameValidation.success) {
-      return res.status(400).json({
-        error: "Invalid folder path format",
-        details: nameValidation.error.issues.map((issue) => issue.message),
-      });
-    }
-
-    const validatedName = nameValidation.data;
-    const path = "/" + validatedName.join("/"); // construct the materialized path
+    const path = "/" + name.join("/"); // construct the materialized path
 
     try {
       // Check if the user is part of the team
@@ -79,18 +68,7 @@ export default async function handle(
         orderBy: {
           name: "asc",
         },
-        select: {
-          id: true,
-          name: true,
-          path: true,
-          parentId: true,
-          dataroomId: true,
-          orderIndex: true,
-          hierarchicalIndex: true,
-          icon: true,
-          color: true,
-          createdAt: true,
-          updatedAt: true,
+        include: {
           _count: {
             select: { documents: true, childFolders: true },
           },

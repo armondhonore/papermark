@@ -1,17 +1,14 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
-import { authOptions } from "@/pages/api/auth/[...nextauth]";
 import { getServerSession } from "next-auth/next";
 
-import { assertDocumentAccess } from "@/lib/api/rbac/entitlements";
-import { isDataroomScopedRole } from "@/lib/api/rbac/permissions";
-import { TeamError, errorhandler } from "@/lib/errorHandler";
-import { getFeatureFlags } from "@/lib/featureFlags";
+import { errorhandler } from "@/lib/errorHandler";
 import { deleteFile } from "@/lib/files/delete-file-server";
 import prisma from "@/lib/prisma";
-import { ratelimit } from "@/lib/redis";
+import { getTeamWithUsersAndDocument } from "@/lib/team/helper";
 import { CustomUser } from "@/lib/types";
-import { serializeFileSize } from "@/lib/utils";
+
+import { authOptions } from "../../../../auth/[...nextauth]";
 
 export default async function handle(
   req: NextApiRequest,
@@ -21,7 +18,7 @@ export default async function handle(
     // GET /api/teams/:teamId/documents/:id
     const session = await getServerSession(req, res, authOptions);
     if (!session) {
-      return res.status(401).json({ message: "Unauthorized" });
+      return res.status(401).end("Unauthorized");
     }
 
     const { teamId, id: docId } = req.query as { teamId: string; id: string };
@@ -29,79 +26,31 @@ export default async function handle(
     const userId = (session.user as CustomUser).id;
 
     try {
-      // Per-user, per-document rate limit to prevent abuse
-      // Default: 120 requests per minute per user per document
-      const { success, limit, remaining, reset } = await ratelimit(
-        120,
-        "1 m",
-      ).limit(`doc:${docId}:team:${teamId}:user:${userId}`);
-
-      res.setHeader("X-RateLimit-Limit", limit.toString());
-      res.setHeader("X-RateLimit-Remaining", remaining.toString());
-      res.setHeader("X-RateLimit-Reset", reset.toString());
-      if (!success) {
-        return res.status(429).json({ error: "Too many requests" });
-      }
-
-      // First verify user has access to the team (lightweight query)
-      const teamAccess = await prisma.userTeam.findUnique({
-        where: {
-          userId_teamId: {
-            userId: userId,
-            teamId: teamId,
-          },
-        },
-        select: { teamId: true, role: true },
-      });
-
-      if (!teamAccess) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      // Dataroom-scoped members may only read a document that lives in one of
-      // their assigned rooms (closes cross-room/all-documents IDOR).
-      const hasDocumentAccess = await assertDocumentAccess({
-        role: teamAccess.role,
-        userId,
+      const { document } = await getTeamWithUsersAndDocument({
         teamId,
-        documentId: docId,
-      });
-      if (!hasDocumentAccess) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-
-      // Then fetch the specific document with its relationships (targeted query)
-      const document = await prisma.document.findUnique({
-        where: {
-          id: docId,
-          teamId,
-        },
-        include: {
-          // Get the latest primary version of the document
-          versions: {
-            where: { isPrimary: true },
-            orderBy: { createdAt: "desc" },
-            take: 1,
-          },
-          folder: {
-            select: {
-              name: true,
-              path: true,
+        userId,
+        docId,
+        options: {
+          include: {
+            // Get the latest primary version of the document
+            versions: {
+              where: { isPrimary: true },
+              orderBy: { createdAt: "desc" },
+              take: 1,
             },
-          },
-          datarooms: {
-            select: {
-              dataroom: {
-                select: {
-                  id: true,
-                  name: true,
-                },
+            folder: {
+              select: {
+                name: true,
+                path: true,
               },
-              folder: {
-                select: {
-                  id: true,
-                  name: true,
-                  path: true,
+            },
+            datarooms: {
+              select: {
+                dataroom: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
                 },
               },
             },
@@ -110,10 +59,7 @@ export default async function handle(
       });
 
       if (!document || !document.versions || document.versions.length === 0) {
-        return res.status(404).json({
-          error: "Not Found",
-          message: "The requested document does not exist",
-        });
+        return res.status(404).end("Document not found");
       }
 
       const pages = await prisma.documentPage.findMany({
@@ -137,23 +83,16 @@ export default async function handle(
       //   return res.status(401).end("Unauthorized to access this document");
       // }
 
-      return res
-        .status(200)
-        .json(serializeFileSize({ ...document, hasPageLinks }));
+      return res.status(200).json({ ...document, hasPageLinks });
     } catch (error) {
-      if (error instanceof TeamError) {
-        return res.status(404).json({
-          error: "Not Found",
-          message: error.message,
-        });
-      }
       errorhandler(error, res);
     }
   } else if (req.method === "PUT") {
     // PUT /api/teams/:teamId/document/:id
     const session = await getServerSession(req, res, authOptions);
     if (!session) {
-      return res.status(401).json({ message: "Unauthorized" });
+      res.status(401).end("Unauthorized");
+      return;
     }
     const userId = (session.user as CustomUser).id;
     const { teamId, id: docId } = req.query as { teamId: string; id: string };
@@ -188,7 +127,7 @@ export default async function handle(
     });
 
     if (!document) {
-      return res.status(404).json({ message: "Document not found" });
+      return res.status(404).end("Document not found");
     }
 
     return res.status(200).json({
@@ -196,81 +135,12 @@ export default async function handle(
       newPath: document.folder?.path,
       oldPath: currentPathName,
     });
-  } else if (req.method === "PATCH") {
-    // PATCH /api/teams/:teamId/documents/:id
-    // Update document settings (e.g., agentsEnabled)
-    const session = await getServerSession(req, res, authOptions);
-    if (!session) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const { teamId, id: docId } = req.query as { teamId: string; id: string };
-    const userId = (session.user as CustomUser).id;
-
-    try {
-      // Verify user has access to the team
-      const teamAccess = await prisma.userTeam.findUnique({
-        where: {
-          userId_teamId: {
-            userId: userId,
-            teamId: teamId,
-          },
-        },
-        select: { role: true },
-      });
-
-      if (!teamAccess) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      // Extract allowed fields from request body
-      const { agentsEnabled } = req.body as {
-        agentsEnabled?: boolean;
-      };
-
-      if (agentsEnabled !== undefined) {
-        const features = await getFeatureFlags({ teamId });
-        if (!features.ai) {
-          return res
-            .status(403)
-            .json({ message: "AI feature is not available" });
-        }
-      }
-
-      // Build update data object with only provided fields
-      const updateData: { agentsEnabled?: boolean } = {};
-
-      if (typeof agentsEnabled === "boolean") {
-        updateData.agentsEnabled = agentsEnabled;
-      }
-
-      // Check if there's anything to update
-      if (Object.keys(updateData).length === 0) {
-        return res.status(400).json({ message: "No valid fields to update" });
-      }
-
-      // Update the document
-      const document = await prisma.document.update({
-        where: {
-          id: docId,
-          teamId: teamId,
-        },
-        data: updateData,
-        select: {
-          id: true,
-          agentsEnabled: true,
-        },
-      });
-
-      return res.status(200).json(document);
-    } catch (error) {
-      errorhandler(error, res);
-    }
   } else if (req.method === "DELETE") {
     // DELETE /api/teams/:teamId/document/:id
     const session = await getServerSession(req, res, authOptions);
     if (!session) {
-      return res.status(401).json({ message: "Unauthorized" });
+      res.status(401).end("Unauthorized");
+      return;
     }
 
     const { teamId, id: docId } = req.query as { teamId: string; id: string };
@@ -278,35 +148,18 @@ export default async function handle(
     const userId = (session.user as CustomUser).id;
 
     try {
-      const teamAccess = await prisma.userTeam.findUnique({
-        where: {
-          userId_teamId: {
-            userId: userId,
-            teamId: teamId,
-          },
-        },
-        select: {
-          role: true,
-        },
-      });
-      if (!teamAccess) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      // Data room members can only remove documents from a data room (via the
-      // dataroom-scoped endpoint); they must never delete the underlying
-      // document for the whole team.
-      if (isDataroomScopedRole(teamAccess.role)) {
-        return res.status(403).json({
-          message:
-            "Data room members cannot delete documents. You can only remove documents from a data room.",
-        });
-      }
-
       const documentVersions = await prisma.document.findUnique({
         where: {
           id: docId,
           teamId: teamId,
+          team: {
+            users: {
+              some: {
+                // role: { in: ["ADMIN", "MANAGER"] },
+                userId: userId,
+              },
+            },
+          },
         },
         include: {
           versions: {
@@ -321,18 +174,14 @@ export default async function handle(
       });
 
       if (!documentVersions) {
-        return res.status(404).json({ message: "Document not found" });
+        return res.status(404).end("Document not found");
       }
 
       //if it is not notion document then only delete the document from storage
       if (documentVersions.type !== "notion") {
         // delete the files from storage
         for (const version of documentVersions.versions) {
-          await deleteFile({
-            type: version.storageType,
-            data: version.file,
-            teamId,
-          });
+          await deleteFile({ type: version.storageType, data: version.file });
         }
       }
 
@@ -348,10 +197,8 @@ export default async function handle(
       errorhandler(error, res);
     }
   } else {
-    // We only allow GET, PUT, PATCH and DELETE requests
-    res.setHeader("Allow", ["GET", "PUT", "PATCH", "DELETE"]);
-    return res
-      .status(405)
-      .json({ message: `Method ${req.method} Not Allowed` });
+    // We only allow GET, PUT and DELETE requests
+    res.setHeader("Allow", ["GET", "PUT", "DELETE"]);
+    return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 }

@@ -5,12 +5,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { DataroomBrand } from "@prisma/client";
 import Cookies from "js-cookie";
 import { ExtendedRecordMap } from "notion-types";
-import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { useAnalytics } from "@/lib/analytics";
 import { SUPPORTED_DOCUMENT_SIMPLE_TYPES } from "@/lib/constants";
-import { useDisablePrint } from "@/lib/hooks/use-disable-print";
 import { LinkWithDataroomDocument, NotionTheme } from "@/lib/types";
 
 import LoadingSpinner from "@/components/ui/loading-spinner";
@@ -21,7 +19,6 @@ import AccessForm, {
 
 import EmailVerificationMessage from "../access-form/email-verification-form";
 import ViewData, { TViewDocumentData } from "../view-data";
-import { DownloadOtpVerification } from "./download-otp-verification";
 
 type RowData = { [key: string]: any };
 type SheetData = {
@@ -39,15 +36,10 @@ export type DEFAULT_DATAROOM_DOCUMENT_VIEW_TYPE = {
   file?: string | null;
   pages?:
     | {
-        file: string | null;
+        file: string;
         pageNumber: string;
         embeddedLinks: string[];
-        pageLinks: {
-          href: string;
-          coords: string;
-          isInternal?: boolean;
-          targetPage?: number;
-        }[];
+        pageLinks: { href: string; coords: string }[];
         metadata: { width: number; height: number; scaleFactor: number };
       }[]
     | null;
@@ -65,10 +57,6 @@ export type DEFAULT_DATAROOM_DOCUMENT_VIEW_TYPE = {
   viewerEmail?: string;
   viewerId?: string;
   conversationsEnabled?: boolean;
-  isTeamMember?: boolean;
-  agentsEnabled?: boolean;
-  isEmbeddable?: boolean;
-  dataroomName?: string;
 };
 
 export default function DataroomDocumentView({
@@ -86,8 +74,6 @@ export default function DataroomDocumentView({
   useCustomAccessForm,
   isEmbedded,
   preview,
-  logoOnAccessForm,
-  textSelectionEnabled,
 }: {
   link: LinkWithDataroomDocument;
   userEmail: string | null | undefined;
@@ -107,10 +93,7 @@ export default function DataroomDocumentView({
   useCustomAccessForm?: boolean;
   isEmbedded?: boolean;
   preview?: boolean;
-  logoOnAccessForm?: boolean;
-  textSelectionEnabled?: boolean;
 }) {
-  useDisablePrint();
   const {
     linkType,
     emailProtected,
@@ -120,7 +103,6 @@ export default function DataroomDocumentView({
 
   const analytics = useAnalytics();
   const router = useRouter();
-  const { t } = useTranslation("access-form");
 
   const didMount = useRef<boolean>(false);
   const [submitted, setSubmitted] = useState<boolean>(false);
@@ -133,6 +115,7 @@ export default function DataroomDocumentView({
   );
   const [verificationRequested, setVerificationRequested] =
     useState<boolean>(false);
+  const [dataroomVerified, setDataroomVerified] = useState<boolean>(false);
   const [verificationToken, setVerificationToken] = useState<string | null>(
     token ?? null,
   );
@@ -140,16 +123,8 @@ export default function DataroomDocumentView({
   const [code, setCode] = useState<string | null>(null);
   const [isInvalidCode, setIsInvalidCode] = useState<boolean>(false);
 
-  // Set when the server requires inline OTP re-auth before granting access.
-  const [uploadReauth, setUploadReauth] = useState<{
-    email: string;
-  } | null>(null);
-
   const handleSubmission = async (): Promise<void> => {
     setIsLoading(true);
-    // Captured up front because the inner `data` binding below shadows the
-    // component-scope `data` (form state).
-    const formEmail = data.email;
     const response = await fetch("/api/views-dataroom", {
       method: "POST",
       headers: {
@@ -164,7 +139,7 @@ export default function DataroomDocumentView({
         userId: userId ?? null,
         documentVersionId: link.dataroomDocument.document.versions[0].id,
         hasPages: link.dataroomDocument.document.versions[0].hasPages,
-        startPage: router.query.p ? Number(router.query.p) : undefined,
+        dataroomVerified: dataroomVerified,
         dataroomId: link.dataroomId,
         linkType: "DATAROOM_LINK",
         dataroomViewId: viewData.dataroomViewId ?? null,
@@ -181,15 +156,6 @@ export default function DataroomDocumentView({
       const fetchData = await response.json();
 
       if (fetchData.type === "email-verification") {
-        analytics.capture("Email Verification Requested", {
-          linkId: link.id,
-          documentId: link.dataroomDocument.document.id,
-          documentName: link.dataroomDocument.document.name,
-          dataroomId: link.dataroomId,
-          linkType: "DATAROOM_LINK",
-          viewerEmail: data.email ?? verifiedEmail ?? userEmail,
-          teamId: link.teamId,
-        });
         setVerificationRequested(true);
         setIsLoading(false);
       } else {
@@ -208,10 +174,6 @@ export default function DataroomDocumentView({
           viewerEmail,
           viewerId,
           conversationsEnabled,
-          isTeamMember,
-          agentsEnabled,
-          isEmbeddable,
-          dataroomName,
         } = fetchData as DEFAULT_DATAROOM_DOCUMENT_VIEW_TYPE;
         analytics.identify(
           userEmail ?? viewerEmail ?? verifiedEmail ?? data.email ?? undefined,
@@ -224,8 +186,6 @@ export default function DataroomDocumentView({
           viewerId: viewerId,
           viewerEmail: viewerEmail ?? data.email ?? verifiedEmail ?? userEmail,
           isEmbedded,
-          isTeamMember,
-          teamId: link.teamId,
         });
 
         // set the verification token to the cookie
@@ -255,10 +215,6 @@ export default function DataroomDocumentView({
           viewerEmail,
           viewerId,
           conversationsEnabled,
-          isTeamMember,
-          agentsEnabled,
-          isEmbeddable,
-          dataroomName,
         }));
         setSubmitted(true);
         setVerificationRequested(false);
@@ -266,22 +222,6 @@ export default function DataroomDocumentView({
       }
     } else {
       const data = await response.json();
-
-      // Server requires inline OTP re-auth. Skip the toast — the OTP
-      // component renders its own explanation.
-      if (
-        response.status === 401 &&
-        data.requiresVerification === "viewer-upload"
-      ) {
-        const reauthEmail =
-          data.email ?? verifiedEmail ?? userEmail ?? formEmail ?? null;
-        if (reauthEmail) {
-          setUploadReauth({ email: reauthEmail });
-          setIsLoading(false);
-          return;
-        }
-      }
-
       toast.error(data.message);
 
       if (data.resetVerification) {
@@ -291,6 +231,7 @@ export default function DataroomDocumentView({
         setVerificationToken(null);
         setCode(null);
         setIsInvalidCode(true);
+        setDataroomVerified(false);
       }
       setIsLoading(false);
     }
@@ -311,21 +252,13 @@ export default function DataroomDocumentView({
         (!submitted && !isProtected) ||
         token ||
         preview ||
-        viewData.dataroomViewId ||
-        previewToken
+        viewData.dataroomViewId
       ) {
         handleSubmission();
         didMount.current = true;
       }
     }
-  }, [
-    submitted,
-    isProtected,
-    token,
-    preview,
-    viewData.dataroomViewId,
-    previewToken,
-  ]);
+  }, [submitted, isProtected, token, preview, viewData.dataroomViewId]);
 
   // Components to render when email is submitted but verification is pending
   if (verificationRequested) {
@@ -338,49 +271,7 @@ export default function DataroomDocumentView({
         setCode={setCode}
         isInvalidCode={isInvalidCode}
         setIsInvalidCode={setIsInvalidCode}
-        brand={brand}
       />
-    );
-  }
-
-  // Inline OTP re-auth step. On success the session flips to verified and
-  // `handleSubmission` retries cleanly.
-  if (uploadReauth) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="w-full max-w-sm space-y-4 rounded-lg border bg-card p-6 shadow-sm">
-          <div className="space-y-1">
-            <h1 className="text-lg font-semibold">{t("reauth.title", "Verify it's you")}</h1>
-            <p className="text-sm text-muted-foreground">
-              <Trans
-                ns="access-form"
-                i18nKey="reauth.description"
-                values={{ email: uploadReauth.email }}
-                components={{ email: <strong /> }}
-              />
-            </p>
-          </div>
-          <DownloadOtpVerification
-            linkId={link.id}
-            email={uploadReauth.email}
-            sendOtpOnMount
-            description={
-              <p className="text-sm text-muted-foreground">
-                <Trans
-                  ns="access-form"
-                  i18nKey="reauth.otpDescription"
-                  values={{ email: uploadReauth.email }}
-                  components={{ email: <strong /> }}
-                />
-              </p>
-            }
-            onVerified={() => {
-              setUploadReauth(null);
-              void handleSubmission();
-            }}
-          />
-        </div>
-      </div>
     );
   }
 
@@ -395,19 +286,14 @@ export default function DataroomDocumentView({
         requireEmail={emailProtected}
         requirePassword={!!linkPassword}
         requireAgreement={enableAgreement!}
-        agreementId={link.agreement?.id}
         agreementName={link.agreement?.name}
         agreementContent={link.agreement?.content}
-        agreementContentType={link.agreement?.contentType}
-        signingProvider={link.agreement?.signingProvider}
         requireName={link.agreement?.requireName}
         isLoading={isLoading}
-        linkId={link.id}
         disableEditEmail={disableEditEmail}
         useCustomAccessForm={useCustomAccessForm}
         brand={brand}
         customFields={link.customFields}
-        logoOnAccessForm={logoOnAccessForm}
       />
     );
   }
@@ -448,8 +334,6 @@ export default function DataroomDocumentView({
             undefined
           }
           canDownload={viewData.canDownload}
-          textSelectionEnabled={textSelectionEnabled}
-          previewToken={previewToken}
         />
       ) : (
         <div className="flex h-screen items-center justify-center">

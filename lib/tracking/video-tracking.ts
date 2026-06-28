@@ -60,7 +60,6 @@ class VideoTracker {
   >;
   private lastVolume: number = 1;
   private hasLoaded: boolean = false;
-  private hasTrackedUnload: boolean = false;
   private debouncedTrackEvent: Record<
     EventType,
     (eventType: EventType, endTime?: number) => void
@@ -117,75 +116,33 @@ class VideoTracker {
     target.addEventListener(type, listener);
   }
 
-  private async trackEvent(eventType: EventType, endTime?: number, useBeacon: boolean = false) {
+  private async trackEvent(eventType: EventType, endTime?: number) {
     if (this.trackingConfig.isPreview) return;
 
     const currentTime = this.videoElement.currentTime;
-    const payload = JSON.stringify({
-      timestamp: new Date().toISOString(),
-      linkId: this.trackingConfig.linkId,
-      documentId: this.trackingConfig.documentId,
-      viewId: this.trackingConfig.viewId,
-      dataroomId: this.trackingConfig.dataroomId,
-      versionNumber: this.trackingConfig.versionNumber,
-      startTime: Math.round(this.lastTrackingTime),
-      endTime: endTime ? Math.round(endTime) : Math.round(currentTime),
-      playbackRate: this.videoElement.playbackRate,
-      volume: this.videoElement.volume,
-      isMuted: this.trackingConfig.isMuted,
-      isFocused: this.trackingConfig.isFocused,
-      isFullscreen: this.trackingConfig.isFullscreen,
-      eventType,
+
+    await fetch("/api/record_video_view", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        timestamp: new Date().toISOString(),
+        linkId: this.trackingConfig.linkId,
+        documentId: this.trackingConfig.documentId,
+        viewId: this.trackingConfig.viewId,
+        dataroomId: this.trackingConfig.dataroomId,
+        versionNumber: this.trackingConfig.versionNumber,
+        startTime: Math.round(this.lastTrackingTime),
+        endTime: endTime ? Math.round(endTime) : Math.round(currentTime),
+        playbackRate: this.videoElement.playbackRate,
+        volume: this.videoElement.volume,
+        isMuted: this.trackingConfig.isMuted,
+        isFocused: this.trackingConfig.isFocused,
+        isFullscreen: this.trackingConfig.isFullscreen,
+        eventType,
+      }),
     });
-
-    const url = "/api/record_video_view";
-
-    // Use sendBeacon for maximum reliability during page unload
-    if (useBeacon && navigator.sendBeacon) {
-      try {
-        const blob = new Blob([payload], { type: "application/json" });
-        const success = navigator.sendBeacon(url, blob);
-        if (success) {
-          this.lastTrackingTime = currentTime;
-          return;
-        }
-      } catch (error) {
-        console.warn("sendBeacon failed:", error);
-      }
-    }
-
-    // Use fetch with keepalive for better reliability
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        body: payload,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        keepalive: true, // Critical for page unload scenarios
-      });
-
-      if (response.ok) {
-        this.lastTrackingTime = currentTime;
-        return;
-      }
-    } catch (error) {
-      console.warn("Fetch with keepalive failed:", error);
-    }
-
-    // Fallback to sendBeacon if fetch failed
-    if (!useBeacon && navigator.sendBeacon) {
-      try {
-        const blob = new Blob([payload], { type: "application/json" });
-        const success = navigator.sendBeacon(url, blob);
-        if (success) {
-          this.lastTrackingTime = currentTime;
-          return;
-        }
-      } catch (error) {
-        console.warn("Fallback sendBeacon failed:", error);
-      }
-    }
 
     this.lastTrackingTime = currentTime;
   }
@@ -339,16 +296,8 @@ class VideoTracker {
   }
 
   public trackVisibilityChange(isVisible: boolean) {
-    if (!isVisible && !this.hasTrackedUnload) {
-      this.hasTrackedUnload = true;
-      if (this.isPlaying) {
-        this.trackEvent("played", undefined, true);
-      }
-      this.trackEvent("blur", undefined, true);
-    } else if (isVisible) {
-      this.hasTrackedUnload = false;
-      this.trackEvent("focus");
-    }
+    const eventType = isVisible ? "focus" : "blur";
+    this.debouncedTrackEvent[eventType](eventType);
   }
 
   public cleanup() {
@@ -358,9 +307,8 @@ class VideoTracker {
       target.removeEventListener(type, listener);
     });
 
-    if (this.isPlaying && !this.hasTrackedUnload) {
-      this.hasTrackedUnload = true;
-      this.trackEvent("played", undefined, true);
+    if (this.isPlaying) {
+      this.debouncedTrackEvent.blur("blur");
     }
   }
 }

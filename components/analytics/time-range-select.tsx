@@ -16,7 +16,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import { UpgradePlanModal } from "@/components/billing/upgrade-plan-modal";
+import { UpgradePlanModal } from "../billing/upgrade-plan-modal";
 
 const TIME_RANGES = [
   { value: "24h", label: "Last 24 hours", shortcut: "D" },
@@ -133,13 +133,13 @@ export function TimeRangeSelect({
         <Button
           variant="outline"
           className={cn(
-            "w-auto justify-between text-left font-normal sm:w-[300px]",
+            "w-[300px] justify-between text-left font-normal",
             !date && "text-muted-foreground",
           )}
         >
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <CalendarIcon className="h-4 w-4 shrink-0" />
-            <span className="text-xs sm:text-sm">
+          <div className="flex items-center gap-2">
+            <CalendarIcon className="h-4 w-4" />
+            <span>
               {value === "custom" && date?.from ? (
                 <>
                   {format(date.from, "MMM d")} -{" "}
@@ -150,7 +150,7 @@ export function TimeRangeSelect({
               )}
             </span>
           </div>
-          <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+          <ChevronDown className="h-4 w-4 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-2" align="end">

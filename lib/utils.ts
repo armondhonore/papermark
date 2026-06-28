@@ -2,13 +2,13 @@ import { NextRouter } from "next/router";
 
 import slugify from "@sindresorhus/slugify";
 import { upload } from "@vercel/blob/client";
-import { transliterate } from "transliteration";
+import { Message } from "ai";
 import bcrypt from "bcryptjs";
-import * as chrono from "chrono-node";
 import { type ClassValue, clsx } from "clsx";
 import crypto from "crypto";
 import ms from "ms";
 import { customAlphabet } from "nanoid";
+import { ThreadMessage } from "openai/resources/beta/threads/messages/messages";
 import { rgb } from "pdf-lib";
 import { ParsedUrlQuery } from "querystring";
 import { toast } from "sonner";
@@ -26,18 +26,6 @@ export function classNames(...classes: string[]) {
 export function getExtension(url: string) {
   // @ts-ignore
   return url.split(/[#?]/)[0].split(".").pop().trim();
-}
-
-/**
- * Ensures a filename has a .pdf extension for watermarked documents
- * Removes any existing extension and adds .pdf
- */
-export function getFileNameWithPdfExtension(filename?: string): string {
-  if (!filename) return "document.pdf";
-
-  // Remove existing extension and add .pdf
-  const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
-  return `${nameWithoutExt}.pdf`;
 }
 
 interface SWRError extends Error {
@@ -60,56 +48,6 @@ export async function fetcher<JSON = any>(
   return res.json();
 }
 
-export const logStore = async ({ object }: { object: any }) => {
-  /* If in development or env variable not set, log to the console */
-  if (
-    process.env.NODE_ENV === "development" ||
-    !process.env.PPMK_STORE_WEBHOOK_URL
-  ) {
-    console.log(object);
-    return;
-  }
-
-  try {
-    if (process.env.PPMK_STORE_WEBHOOK_URL) {
-      return await fetch(process.env.PPMK_STORE_WEBHOOK_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(object),
-      });
-    }
-  } catch (e) {
-    console.error("Error logging store:", e);
-    return;
-  }
-};
-
-const LOG_TIMEOUT_MS = 2500;
-
-const postJsonWithTimeout = async (
-  url: string,
-  body: unknown,
-  timeoutMs: number,
-) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  timeoutId.unref?.();
-  try {
-    return await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeoutId);
-  }
-};
-
 export const log = async ({
   message,
   type,
@@ -130,32 +68,45 @@ export const log = async ({
 
   /* Log a message to channel */
   try {
-    const payload = {
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            // prettier-ignore
-            text: `${mention ? "<@U05BTDUKPLZ> " : ""}${type === "error" ? ":rotating_light: " : ""}${message}`,
-          },
-        },
-      ],
-    };
-
     if (type === "trial" && process.env.PPMK_TRIAL_SLACK_WEBHOOK_URL) {
-      return await postJsonWithTimeout(
-        process.env.PPMK_TRIAL_SLACK_WEBHOOK_URL,
-        payload,
-        LOG_TIMEOUT_MS,
-      );
+      return await fetch(`${process.env.PPMK_TRIAL_SLACK_WEBHOOK_URL}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                // prettier-ignore
+                text: `${mention ? "<@U05BTDUKPLZ> " : ""}${message}`,
+              },
+            },
+          ],
+        }),
+      });
     }
 
-    return await postJsonWithTimeout(
-      `${process.env.PPMK_SLACK_WEBHOOK_URL}`,
-      payload,
-      LOG_TIMEOUT_MS,
-    );
+    return await fetch(`${process.env.PPMK_SLACK_WEBHOOK_URL}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              // prettier-ignore
+              text: `${mention ? "<@U05BTDUKPLZ> " : ""}${type === "error" ? ":rotating_light: " : ""}${message}`,
+            },
+          },
+        ],
+      }),
+    });
   } catch (e) {}
 };
 
@@ -198,32 +149,24 @@ export function capitalize(str: string) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-export const timeAgo = (timestamp?: Date | string | number): string => {
+export const timeAgo = (timestamp?: Date): string => {
   if (!timestamp) return "Just now";
-  const date = new Date(timestamp);
-  const diff = Date.now() - date.getTime();
+  const diff = Date.now() - new Date(timestamp).getTime();
   if (diff < 60000) {
     // less than 1 second
     return "Just now";
   } else if (diff > 82800000) {
     // more than 23 hours – similar to how Twitter displays timestamps
-    return date.toLocaleDateString("en-US", {
+    return new Date(timestamp).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       year:
-        date.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
+        new Date(timestamp).getFullYear() !== new Date().getFullYear()
+          ? "numeric"
+          : undefined,
     });
   }
   return `${ms(diff)} ago`;
-};
-
-export const timeIn = (timestamp?: Date): string => {
-  if (!timestamp) return "Just now";
-  const diff = new Date(timestamp).getTime() - Date.now();
-  if (diff < 60000) {
-    return "Just now";
-  }
-  return `in ${ms(diff, { long: true })}`;
 };
 
 export const durationFormat = (durationInMilliseconds?: number): string => {
@@ -269,22 +212,6 @@ export const getDateTimeLocal = (timestamp?: Date): string => {
     .split(":")
     .slice(0, 2)
     .join(":");
-};
-
-export const formatDateTime = (
-  datetime: Date | string,
-  options?: Intl.DateTimeFormatOptions,
-) => {
-  if (datetime.toString() === "Invalid Date") return "";
-  return new Date(datetime).toLocaleTimeString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: true,
-    ...options,
-  });
 };
 
 export async function hashPassword(password: string): Promise<string> {
@@ -352,63 +279,6 @@ export const nanoid = customAlphabet(
   7,
 ); // 7-character random string
 
-/**
- * CJK-safe slugify: transliterates non-Latin characters (CJK, Cyrillic, etc.)
- * to their romanized equivalents before slugifying, so the same input always
- * produces the same slug. e.g. "文件报告" → "wen-jian-bao-gao"
- */
-export function safeSlugify(input: string): string {
-  const slug = slugify(input);
-  if (slug.length > 0) return slug;
-  return slugify(transliterate(input)) || nanoid();
-}
-
-/**
- * RFC 5987 percent-encoder for Content-Disposition `filename*` values.
- *
- * `encodeURIComponent` leaves `! * ' ( ) ~` unencoded, but RFC 5987's
- * `attr-char` set does not allow any of those, and strict parsers
- * (e.g. Go's `mime.ParseMediaType` used by Gotenberg) reject them with
- * `mime: invalid media parameter`.
- */
-export function encodeRFC5987(value: string): string {
-  return encodeURIComponent(value).replace(
-    /['()*!~]/g,
-    (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
-  );
-}
-
-/**
- * Build a strictly RFC 5987-compliant Content-Disposition header so downstream
- * tooling (Gotenberg/LibreOffice, etc.) can parse it without errors. The
- * `filename` fallback uses the slugified ASCII name; `filename*` carries the
- * original (possibly Unicode) name, percent-encoded per RFC 5987.
- */
-export function buildContentDisposition(
-  originalFileName: string,
-  slugifiedName: string,
-): string {
-  return `attachment; filename="${slugifiedName}"; filename*=UTF-8''${encodeRFC5987(originalFileName)}`;
-}
-
-/**
- * Build a Content-Disposition `attachment` header for a single download
- * filename (already including its extension). This handles slugifying the
- * ASCII fallback so the header is safe across browsers and proxies, while
- * preserving the original Unicode name in `filename*` per RFC 5987.
- *
- * Use this for ad-hoc downloads (e.g. ResponseContentDisposition on S3
- * presigned URLs) where the caller already produced a complete filename.
- */
-export function buildAttachmentDispositionForName(filename: string): string {
-  const dotIdx = filename.lastIndexOf(".");
-  const base = dotIdx > 0 ? filename.slice(0, dotIdx) : filename;
-  const ext = dotIdx > 0 ? filename.slice(dotIdx) : "";
-  const sanitizedExt = /^\.[A-Za-z0-9]+$/.test(ext) ? ext : "";
-  const slug = safeSlugify(base) + sanitizedExt;
-  return buildContentDisposition(filename, slug);
-}
-
 export const daysLeft = (
   accountCreationDate: Date,
   maxDays: number,
@@ -419,8 +289,8 @@ export const daysLeft = (
 
   const diffInMilliseconds = endPeriodDate.getTime() - now.getTime();
 
-  // Convert milliseconds to days and round down to show complete days remaining
-  return Math.floor(diffInMilliseconds / (1000 * 60 * 60 * 24));
+  // Convert milliseconds to days and return
+  return Math.ceil(diffInMilliseconds / (1000 * 60 * 60 * 24));
 };
 
 const cutoffDate = new Date("2023-10-17T00:00:00.000Z");
@@ -434,6 +304,53 @@ export const calculateDaysLeft = (accountCreationDate: Date): number => {
     maxDays = 14;
   }
   return daysLeft(accountCreationDate, maxDays);
+};
+
+// helper function to convert ThreadMessages (an OpenAI type for messages) to Messages (an vercel/ai type for messages)
+export const convertThreadMessagesToMessages = (
+  threadMessages: ThreadMessage[],
+): Message[] => {
+  // Filter out messages with metaData.intitialMessage == 'True'
+  const filteredMessages = threadMessages.filter((threadMessage) => {
+    if (
+      typeof threadMessage.metadata === "object" &&
+      threadMessage.metadata !== null
+    ) {
+      // Safely typecast metadata to an object with the expected structure
+      const metadata = threadMessage.metadata as { intitialMessage?: string };
+      return metadata.intitialMessage !== "True";
+    }
+    return true; // Include messages where metadata is not an object or is null
+  });
+
+  return filteredMessages.map((threadMessage) => {
+    const {
+      id,
+      created_at,
+      content,
+      role,
+      // other fields you might need from ThreadMessage
+    } = threadMessage;
+
+    // Assuming content is an array and you want to convert it into a string or JSX element
+    const messageContent = content.map((item) => {
+      if (item.type === "text") {
+        return item.text.value;
+      } else {
+        return "";
+      }
+    });
+
+    return {
+      id,
+      createdAt: new Date(created_at * 1000), // converting Unix timestamp to Date object
+      content: messageContent[0],
+      role: role === "assistant" ? "assistant" : "user", // Adjust according to your needs
+      // Set other properties as required by Message interface
+      ui: null, // example, set based on your UI requirements
+      // name, function_call, and other fields as needed
+    };
+  });
 };
 
 export function constructMetadata({
@@ -598,14 +515,8 @@ export async function generateEncrpytedPassword(
   // If the password is empty, return an empty string
   if (!password) return "";
   // If the password is already encrypted, return it
-  // Check if it's encrypted by validating the format: 32-char hex IV + ":" + hex encrypted text
   const textParts: string[] = password.split(":");
-  if (
-    textParts.length === 2 &&
-    textParts[0].length === 32 &&
-    /^[a-fA-F0-9]+$/.test(textParts[0]) &&
-    /^[a-fA-F0-9]+$/.test(textParts[1])
-  ) {
+  if (textParts.length === 2) {
     return password;
   }
   // Otherwise, encrypt the password
@@ -629,98 +540,34 @@ export function decryptEncrpytedPassword(password: string): string {
     .digest("base64")
     .substring(0, 32);
   const textParts: string[] = password.split(":");
-  // Check if it's in the expected encrypted format: 32-char hex IV + ":" + hex encrypted text
-  if (
-    !textParts ||
-    textParts.length !== 2 ||
-    textParts[0].length !== 32 ||
-    !/^[a-fA-F0-9]+$/.test(textParts[0]) ||
-    !/^[a-fA-F0-9]+$/.test(textParts[1])
-  ) {
-    return password; // Return as-is if not in encrypted format
-  }
-  try {
-    const IV: Buffer = Buffer.from(textParts[0], "hex");
-    const encryptedText: string = textParts[1];
-    const decipher = crypto.createDecipheriv("aes-256-ctr", encryptedKey, IV);
-    let decrypted: string = decipher.update(encryptedText, "hex", "utf8");
-    decrypted += decipher.final("utf8");
-    return decrypted;
-  } catch (error) {
+  if (!textParts || textParts.length !== 2) {
     return password;
   }
+  const IV: Buffer = Buffer.from(textParts[0], "hex");
+  const encryptedText: string = textParts[1];
+  const decipher = crypto.createDecipheriv("aes-256-ctr", encryptedKey, IV);
+  let decrypted: string = decipher.update(encryptedText, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  return decrypted;
 }
 
-type FilterMode = "email" | "domain" | "both";
-
-const LIST_SEPARATOR_REGEX = /[,;\n\r\t]+/;
-
-export type ListValidation = {
-  /** All entries entered by the user (de-duplicated, lower-cased). */
-  all: string[];
-  /** Subset of `all` that passes validation for the requested mode. */
-  valid: string[];
-  /** Subset of `all` that did NOT pass validation. */
-  invalid: string[];
-};
-
-/**
- * Splits a free-form text list of emails / domains by any combination of
- * comma, semicolon, newline, carriage return, or tab characters and
- * returns the unique, validated entries.
- *
- * Splits with the following separators: `,`, `;`, `\n`, `\r`, `\t`.
- */
-export const validateList = (
-  list: string,
-  mode: FilterMode = "both",
-): ListValidation => {
+export const sanitizeAllowDenyList = (list: string): string[] => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const domainRegex = /^@[^\s@]+\.[^\s@]+$/;
 
-  const isValid = (item: string): boolean => {
-    if (mode === "email") return emailRegex.test(item);
-    if (mode === "domain") return domainRegex.test(item);
-    return emailRegex.test(item) || domainRegex.test(item);
-  };
-
-  const seen = new Set<string>();
-  const all: string[] = [];
-  const valid: string[] = [];
-  const invalid: string[] = [];
-
-  for (const raw of list.split(LIST_SEPARATOR_REGEX)) {
-    const item = raw.trim().toLowerCase();
-    if (!item) continue;
-    if (seen.has(item)) continue;
-    seen.add(item);
-    all.push(item);
-    if (isValid(item)) {
-      valid.push(item);
-    } else {
-      invalid.push(item);
-    }
-  }
-
-  return { all, valid, invalid };
+  return list
+    .split("\n")
+    .map((item) => item.trim().replace(/,$/, "").toLowerCase()) // Trim whitespace and remove trailing commas and lowercase
+    .filter((item) => item !== "") // Remove empty items
+    .filter((item) => emailRegex.test(item) || domainRegex.test(item)); // Remove items that don't match email or domain regex
 };
-
-/**
- * Backwards-compatible helper that returns only the valid, de-duplicated
- * entries from a free-form list. Accepts comma, semicolon, newline,
- * carriage return, and tab as separators.
- */
-export const sanitizeList = (
-  list: string,
-  mode: FilterMode = "both",
-): string[] => validateList(list, mode).valid;
 
 export function hexToRgb(hex: string) {
   let bigint = parseInt(hex.slice(1), 16);
   let r = ((bigint >> 16) & 255) / 255; // Convert to 0-1 range
   let g = ((bigint >> 8) & 255) / 255; // Convert to 0-1 range
   let b = (bigint & 255) / 255; // Convert to 0-1 range
-  return rgb(r, g, b);
+  return rgb(r, g, g);
 }
 
 export const trim = (u: unknown) => (typeof u === "string" ? u.trim() : u);
@@ -735,7 +582,7 @@ export const getBreadcrumbPath = (path: string[]) => {
   return [
     { name: "Home", pathLink: "/documents" },
     ...segments.map((segment, index) => {
-      currentPath += `/${safeSlugify(segment)}`;
+      currentPath += `/${slugify(segment)}`;
       return {
         name: segment,
         pathLink: currentPath,
@@ -765,177 +612,3 @@ export const handleInvitationStatus = (
     shallow: true,
   });
 };
-
-/**
- * Preset options for the expiration time of a link.
- * @type {Array<{ label: string, value: number }>}
- */
-
-export const PRESET_OPTIONS: { label: string; value: number }[] = [
-  { label: "in 1 hour", value: 3600 },
-  { label: "in 6 hours", value: 21600 },
-  { label: "in 12 hours", value: 43200 },
-  { label: "in 1 day", value: 86400 },
-  { label: "in 3 days", value: 259200 },
-  { label: "in 7 days", value: 604800 },
-  { label: "in 14 days", value: 1209600 },
-  { label: "in 1 month", value: 2592000 },
-  { label: "in 3 months", value: 7776000 },
-  { label: "in 6 months", value: 15552000 },
-  { label: "in 1 year", value: 31536000 },
-];
-export const WITH_CUSTOM_PRESET_OPTION: {
-  label: string;
-  value: number | string;
-}[] = [...PRESET_OPTIONS, { label: "Custom", value: "custom" }];
-
-export const formatExpirationTime = (seconds: number) => {
-  // Define constants for time units
-  const MINUTE = 60;
-  const HOUR = 3600;
-  const DAY = 86400;
-  const YEAR = 31536000;
-
-  seconds = Math.ceil(seconds / MINUTE) * MINUTE;
-
-  if (seconds < MINUTE) {
-    return "Less than a minute";
-  }
-
-  // Return exact unit match if possible
-  if (seconds % YEAR === 0) {
-    const years = seconds / YEAR;
-    return `${years} year${years !== 1 ? "s" : ""}`;
-  }
-
-  if (seconds % DAY === 0) {
-    const days = seconds / DAY;
-    return `${days} day${days !== 1 ? "s" : ""}`;
-  }
-
-  if (seconds % HOUR === 0 && seconds < DAY) {
-    const hours = seconds / HOUR;
-    return `${hours} hour${hours !== 1 ? "s" : ""}`;
-  }
-
-  if (seconds % MINUTE === 0 && seconds < HOUR) {
-    const minutes = seconds / MINUTE;
-    return `${minutes} minute${minutes !== 1 ? "s" : ""}`;
-  }
-
-  // Mixed unit fallbacks
-  if (seconds < HOUR) {
-    const minutes = Math.floor(seconds / MINUTE);
-    return `${minutes} minute${minutes !== 1 ? "s" : ""}`;
-  }
-
-  if (seconds < DAY) {
-    const hours = Math.floor(seconds / HOUR);
-    const minutes = Math.floor((seconds % HOUR) / MINUTE);
-    return (
-      `${hours} hour${hours !== 1 ? "s" : ""}` +
-      (minutes > 0 ? ` and ${minutes} minute${minutes !== 1 ? "s" : ""}` : "")
-    );
-  }
-
-  if (seconds < YEAR) {
-    const days = Math.floor(seconds / DAY);
-    const remainingSeconds = seconds % DAY;
-    const hours = Math.floor(remainingSeconds / HOUR);
-    const minutes = Math.floor((remainingSeconds % HOUR) / MINUTE);
-
-    let result = `${days} day${days !== 1 ? "s" : ""}`;
-
-    if (hours > 0 && minutes > 0) {
-      result += `, ${hours} hour${hours !== 1 ? "s" : ""} and ${minutes} minute${minutes !== 1 ? "s" : ""}`;
-    } else if (hours > 0) {
-      result += ` and ${hours} hour${hours !== 1 ? "s" : ""}`;
-    } else if (minutes > 0) {
-      result += ` and ${minutes} minute${minutes !== 1 ? "s" : ""}`;
-    }
-
-    return result;
-  }
-
-  // Years + remaining time
-  const years = Math.floor(seconds / YEAR);
-  const remainingSeconds = seconds % YEAR;
-  const days = Math.floor(remainingSeconds / DAY);
-  const hours = Math.floor((remainingSeconds % DAY) / HOUR);
-  const minutes = Math.floor((remainingSeconds % HOUR) / MINUTE);
-
-  let result = `${years} year${years !== 1 ? "s" : ""}`;
-
-  if (days > 0) {
-    result += `, ${days} day${days !== 1 ? "s" : ""}`;
-  }
-  if (hours > 0) {
-    result += `, ${hours} hour${hours !== 1 ? "s" : ""}`;
-  }
-  if (minutes > 0) {
-    result += ` and ${minutes} minute${minutes !== 1 ? "s" : ""}`;
-  }
-
-  return result;
-};
-
-// from DUB.IO
-export const parseDateTime = (str: Date | string) => {
-  if (str instanceof Date) return str;
-  return chrono.parseDate(str);
-};
-
-/**
- * Safely replaces template variables in user input with actual values.
- * Only allows whitelisted variables to prevent template injection.
- */
-export function safeTemplateReplace(
-  template: string,
-  data: Record<string, any>,
-): string {
-  // Define allowed template variables - only these will be replaced
-  const allowedVariables = ["email", "date", "time", "link", "ipAddress"];
-
-  let result = template;
-
-  for (const key of allowedVariables) {
-    if (data[key] !== undefined && data[key] !== null) {
-      // Use a regex to match {{variable}} patterns with optional whitespace
-      const regex = new RegExp(`{{\\s*${key}\\s*}}`, "gi");
-      result = result.replace(regex, String(data[key]));
-    }
-  }
-
-  return result;
-}
-
-/**
- * Converts BigInt fileSize values to numbers for safe serialization
- * Recursively processes objects and arrays, converting only fileSize fields
- */
-export function serializeFileSize(obj: any): any {
-  if (obj === null || obj === undefined) {
-    return obj;
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.map(serializeFileSize);
-  }
-
-  if (typeof obj === "object") {
-    const serialized: any = {};
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        if (key === "fileSize" && typeof obj[key] === "bigint") {
-          // Convert BigInt fileSize to number
-          serialized[key] = Number(obj[key]);
-        } else {
-          serialized[key] = serializeFileSize(obj[key]);
-        }
-      }
-    }
-    return serialized;
-  }
-
-  return obj;
-}

@@ -4,12 +4,11 @@ import { useEffect, useState } from "react";
 
 import { useTeam } from "@/context/team-context";
 import { Webhook } from "@prisma/client";
+import { format } from "date-fns";
 import { ArrowLeft, Check, Copy, WebhookIcon } from "lucide-react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import z from "zod";
 
-import { usePlan } from "@/lib/swr/use-billing";
 import { cn, fetcher } from "@/lib/utils";
 
 import AppLayout from "@/components/layouts/app";
@@ -32,14 +31,24 @@ type WebhookFormData = {
 export default function WebhookDetail() {
   const router = useRouter();
   const { id } = router.query;
-  const { currentTeamId: teamId } = useTeam();
-  const { isFree, isPro, isTrial } = usePlan();
+  const teamInfo = useTeam();
+  const teamId = teamInfo?.currentTeam?.id;
   const [isEditing, setIsEditing] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
-  const [formData, setFormData] = useState<WebhookFormData>({
-    name: "",
-    triggers: [],
-  });
+
+  // Feature flag check
+  const { data: features } = useSWR<{ webhooks: boolean }>(
+    teamId ? `/api/feature-flags?teamId=${teamId}` : null,
+    fetcher,
+  );
+
+  // Redirect if feature is not enabled
+  useEffect(() => {
+    if (features && !features.webhooks) {
+      router.push("/settings/general");
+      toast.error("This feature is not available for your team");
+    }
+  }, [features, router]);
 
   const { data: webhook, mutate } = useSWR<Webhook>(
     teamId && id ? `/api/teams/${teamId}/webhooks/${id}` : null,
@@ -54,6 +63,11 @@ export default function WebhookDetail() {
     },
   );
 
+  const [formData, setFormData] = useState<WebhookFormData>({
+    name: "",
+    triggers: [],
+  });
+
   useEffect(() => {
     if (webhook) {
       setFormData({
@@ -64,21 +78,12 @@ export default function WebhookDetail() {
   }, [webhook]);
 
   const handleUpdate = async () => {
-    if ((isFree || isPro) && !isTrial) {
-      toast.error("This feature is not available on your plan");
-      return;
-    }
-
     try {
-      const webhookId = z.string().cuid().parse(id);
-      const response = await fetch(
-        `/api/teams/${teamId}/webhooks/${webhookId}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
-        },
-      );
+      const response = await fetch(`/api/teams/${teamId}/webhooks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
 
       if (!response.ok) throw new Error("Failed to update webhook");
 
@@ -341,15 +346,7 @@ export default function WebhookDetail() {
                   <div className="pt-4">
                     {isEditing ? (
                       <div className="flex gap-2">
-                        <Button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleUpdate();
-                          }}
-                        >
-                          Save Changes
-                        </Button>
+                        <Button onClick={handleUpdate}>Save Changes</Button>
                         <Button
                           variant="outline"
                           className="dark:bg-transparent dark:hover:bg-muted"
@@ -359,19 +356,7 @@ export default function WebhookDetail() {
                         </Button>
                       </div>
                     ) : (
-                      <Button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if ((isFree || isPro) && !isTrial) {
-                            toast.error(
-                              "This feature is not available on your plan",
-                            );
-                            return;
-                          }
-                          setIsEditing(true);
-                        }}
-                      >
+                      <Button onClick={() => setIsEditing(true)}>
                         Click to edit webhook
                       </Button>
                     )}
@@ -399,9 +384,8 @@ export default function WebhookDetail() {
                         )
                       ) {
                         try {
-                          const webhookId = z.string().cuid().parse(id);
                           const response = await fetch(
-                            `/api/teams/${teamId}/webhooks/${webhookId}`,
+                            `/api/teams/${teamId}/webhooks/${id}`,
                             {
                               method: "DELETE",
                             },

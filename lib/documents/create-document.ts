@@ -1,15 +1,13 @@
 import { DocumentStorageType } from "@prisma/client";
-import z from "zod";
 
 export type DocumentData = {
   name: string;
   key: string;
   storageType: DocumentStorageType;
-  contentType: string | null; // actual file mime type
+  contentType: string; // actual file mime type
   supportedFileType: string; // papermark types: "pdf", "sheet", "docs", "slides", "map", "zip"
   fileSize: number | undefined; // file size in bytes
   numPages?: number;
-  enableExcelAdvancedMode?: boolean;
 };
 
 export const createDocument = async ({
@@ -51,8 +49,7 @@ export const createDocument = async ({
   );
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error);
+    throw new Error(`HTTP error! status: ${response.status}`);
   }
 
   return response;
@@ -100,47 +97,33 @@ export const createNewDocumentVersion = async ({
   documentId,
   teamId,
   numPages,
-  token,
 }: {
   documentData: DocumentData;
   documentId: string;
   teamId: string;
   numPages?: number;
-  token?: string;
 }) => {
-  try {
-    const documentIdParsed = z.string().cuid().parse(documentId);
-
-    // Use absolute URL when a token is provided (server-side / webhook context),
-    // otherwise use a relative URL (client-side context).
-    const baseUrl = token ? process.env.NEXT_PUBLIC_BASE_URL : "";
-
-    const response = await fetch(
-      `${baseUrl}/api/teams/${teamId}/documents/${documentIdParsed}/versions`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          url: documentData.key,
-          storageType: documentData.storageType,
-          numPages: numPages,
-          type: documentData.supportedFileType,
-          contentType: documentData.contentType,
-          fileSize: documentData.fileSize,
-        }),
+  const response = await fetch(
+    `/api/teams/${teamId}/documents/${documentId}/versions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify({
+        url: documentData.key,
+        storageType: documentData.storageType,
+        numPages: numPages,
+        type: documentData.supportedFileType,
+        contentType: documentData.contentType,
+        fileSize: documentData.fileSize,
+      }),
+    },
+  );
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    return response;
-  } catch (error) {
-    console.error("Error creating new document version:", error);
-    throw new Error("Invalid document ID or team ID");
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
   }
+
+  return response;
 };

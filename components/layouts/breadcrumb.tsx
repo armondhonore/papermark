@@ -1,13 +1,7 @@
 import Link from "next/link";
 import { useRouter } from "next/router";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-
-import { useDataroom } from "@/lib/swr/use-dataroom";
-import { useDataroomDocumentOverview } from "@/lib/swr/use-dataroom-document";
-import { useDocument } from "@/lib/swr/use-document";
-import { useFolderWithParents } from "@/lib/swr/use-folders";
-import useViewer from "@/lib/swr/use-viewer";
+import { useMemo } from "react";
 
 import { BreadcrumbComponent as DataroomBreadcrumb } from "@/components/datarooms/dataroom-breadcrumb";
 import {
@@ -25,7 +19,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { BadgeTooltip } from "@/components/ui/tooltip";
+
+import { useDataroom } from "@/lib/swr/use-dataroom";
+import { useDocument } from "@/lib/swr/use-document";
+import { useFolderWithParents } from "@/lib/swr/use-folders";
+import useViewer from "@/lib/swr/use-viewer";
 
 const FOLDERS_TO_DISPLAY = 1; // Only show the last folder in the path
 
@@ -53,7 +51,7 @@ const SingleDocumentBreadcrumb = () => {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
                   {folders.slice(0, -1).map((folder, index) => (
-                    <DropdownMenuItem key={`${folder.path}-${index}`}>
+                    <DropdownMenuItem key={index}>
                       <Link
                         href={`/documents/tree${folder.path}`}
                         className="w-full"
@@ -80,8 +78,8 @@ const SingleDocumentBreadcrumb = () => {
           </>
         ) : (
           folders?.map((folder, index) => (
-            <React.Fragment key={`${folder.path}-${index}`}>
-              <BreadcrumbItem>
+            <>
+              <BreadcrumbItem key={`item-${index}`}>
                 <BreadcrumbLink asChild>
                   <Link
                     href={`/documents/tree${folder.path}`}
@@ -91,8 +89,8 @@ const SingleDocumentBreadcrumb = () => {
                   </Link>
                 </BreadcrumbLink>
               </BreadcrumbItem>
-              <BreadcrumbSeparator />
-            </React.Fragment>
+              <BreadcrumbSeparator key={`sep-${index}`} />
+            </>
           ))
         )}
         {document && (
@@ -105,45 +103,6 @@ const SingleDocumentBreadcrumb = () => {
       </BreadcrumbList>
     </Breadcrumb>
   );
-};
-
-export const TruncatedBreadcrumbLink = ({
-  href,
-  text,
-}: {
-  href: string;
-  text: string | undefined;
-}) => {
-  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
-  const breadcrumbRef = useRef<HTMLAnchorElement>(null);
-
-  useEffect(() => {
-    if (
-      breadcrumbRef.current &&
-      breadcrumbRef.current.scrollWidth > breadcrumbRef.current.clientWidth
-    ) {
-      setIsTooltipVisible(true);
-    } else {
-      setIsTooltipVisible(false);
-    }
-  }, [text]);
-
-  const link = (
-    <BreadcrumbLink asChild>
-      <Link
-        ref={breadcrumbRef}
-        href={href}
-        className="max-w-32 truncate md:max-w-60"
-      >
-        {text || "Loading..."}
-      </Link>
-    </BreadcrumbLink>
-  );
-
-  if (isTooltipVisible) {
-    return <BadgeTooltip content={text || ""}>{link}</BadgeTooltip>;
-  }
-  return link;
 };
 
 const SingleDataroomBreadcrumb = ({ path }: { path: string }) => {
@@ -166,15 +125,8 @@ const SingleDataroomBreadcrumb = ({ path }: { path: string }) => {
         return "Permissions";
       case "/datarooms/[id]/analytics":
         return "Analytics";
-      case "/datarooms/[id]/conversations/faqs":
-        return "FAQ";
       case "/datarooms/[id]/conversations":
-      case "/datarooms/[id]/conversations/[conversationId]":
         return "Conversations";
-      case "/datarooms/[id]/settings/notifications":
-        return "Notifications";
-      case "/datarooms/[id]/settings/file-permissions":
-        return "File Permissions";
       default:
         return dataroom?.name || "Loading...";
     }
@@ -190,49 +142,15 @@ const SingleDataroomBreadcrumb = ({ path }: { path: string }) => {
         </BreadcrumbItem>
         <BreadcrumbSeparator />
         <BreadcrumbItem>
-          <TruncatedBreadcrumbLink
-            href={`/datarooms/${dataroom?.id}/documents`}
-            text={dataroom?.name}
-          />
+          <BreadcrumbLink asChild>
+            <Link href={`/datarooms/${dataroom?.id}/documents`}>
+              {dataroom?.name}
+            </Link>
+          </BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator />
         <BreadcrumbItem>
           <BreadcrumbPage>{title}</BreadcrumbPage>
-        </BreadcrumbItem>
-      </BreadcrumbList>
-    </Breadcrumb>
-  );
-};
-
-const SingleDataroomDocumentBreadcrumb = () => {
-  const { dataroom, document } = useDataroomDocumentOverview();
-
-  return (
-    <Breadcrumb>
-      <BreadcrumbList>
-        <BreadcrumbItem>
-          <BreadcrumbLink asChild>
-            <Link href="/datarooms">Datarooms</Link>
-          </BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        <BreadcrumbItem>
-          <TruncatedBreadcrumbLink
-            href={`/datarooms/${dataroom?.id}/documents`}
-            text={dataroom?.name}
-          />
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        <BreadcrumbItem>
-          <BreadcrumbLink asChild>
-            <Link href={`/datarooms/${dataroom?.id}/documents`}>Documents</Link>
-          </BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        <BreadcrumbItem>
-          <BreadcrumbPage className="max-w-[200px] truncate">
-            {document?.name || "Loading..."}
-          </BreadcrumbPage>
         </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>
@@ -248,21 +166,17 @@ const SettingsBreadcrumb = () => {
       case "/settings/general":
         return "General";
       case "/settings/people":
-        return "Team";
+        return "People";
       case "/settings/domains":
         return "Domains";
       case "/settings/presets":
         return "Presets";
       case "/settings/billing":
         return "Billing";
-      case "/settings/billing/invoices":
-        return "Invoices";
       case "/settings/tokens":
         return "API Tokens";
       case "/settings/webhooks":
         return "Webhooks";
-      case "/settings/slack":
-        return "Slack";
       case "/settings/incoming-webhooks":
         return "Incoming Webhooks";
       case "/settings/branding":
@@ -271,8 +185,6 @@ const SettingsBreadcrumb = () => {
         return "Settings";
     }
   }, [path]);
-
-  const isInvoicesPage = path === "/settings/billing/invoices";
 
   return (
     <Breadcrumb>
@@ -283,23 +195,9 @@ const SettingsBreadcrumb = () => {
           </BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator />
-        {isInvoicesPage ? (
-          <>
-            <BreadcrumbItem>
-              <BreadcrumbLink asChild>
-                <Link href="/settings/billing">Billing</Link>
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>Invoices</BreadcrumbPage>
-            </BreadcrumbItem>
-          </>
-        ) : (
-          <BreadcrumbItem>
-            <BreadcrumbPage>{settingsTitle}</BreadcrumbPage>
-          </BreadcrumbItem>
-        )}
+        <BreadcrumbItem>
+          <BreadcrumbPage>{settingsTitle}</BreadcrumbPage>
+        </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>
   );
@@ -361,7 +259,7 @@ const DocumentsBreadcrumb = () => {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
                   {folders.slice(0, -2).map((folder, index) => (
-                    <DropdownMenuItem key={`${folder.path}-${index}`}>
+                    <DropdownMenuItem key={index}>
                       <Link
                         href={`/documents/tree${folder.path}`}
                         className="w-full"
@@ -393,7 +291,7 @@ const DocumentsBreadcrumb = () => {
           </>
         ) : (
           folders?.map((folder, index) => (
-            <React.Fragment key={`${folder.path}-${index}`}>
+            <>
               <BreadcrumbItem key={`item-${index}`}>
                 {index === folders.length - 1 ? (
                   <BreadcrumbPage className="max-w-[200px] truncate">
@@ -411,7 +309,7 @@ const DocumentsBreadcrumb = () => {
                 )}
               </BreadcrumbItem>
               {index < folders.length - 1 && <BreadcrumbSeparator />}
-            </React.Fragment>
+            </>
           ))
         )}
       </BreadcrumbList>
@@ -468,7 +366,7 @@ const AnalyticsBreadcrumb = () => {
       case "visitors":
         return "Visitors";
       case "views":
-        return "Recent Views";
+        return "Recent Visits";
       default:
         return "Analytics";
     }
@@ -545,11 +443,6 @@ export const AppBreadcrumb = () => {
     // Dataroom document routes
     if (path === "/datarooms/[id]/documents/[...name]" && id) {
       return <DataroomBreadcrumb />;
-    }
-
-    // Single dataroom document route
-    if (path === "/datarooms/[id]/document/[documentId]" && id) {
-      return <SingleDataroomDocumentBreadcrumb />;
     }
 
     // Single dataroom route

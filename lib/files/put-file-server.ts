@@ -1,14 +1,14 @@
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { DocumentStorageType } from "@prisma/client";
+import slugify from "@sindresorhus/slugify";
 import { put } from "@vercel/blob";
 import path from "node:path";
 import { match } from "ts-pattern";
 
 import { newId } from "@/lib/id-helper";
-import { buildContentDisposition, safeSlugify } from "@/lib/utils";
 
 import { SUPPORTED_DOCUMENT_MIME_TYPES } from "../constants";
-import { getTeamS3ClientAndConfig } from "./aws-client";
+import { getS3Client } from "./aws-client";
 
 // `File` is a web API type and not available server-side, so we need to define our own type
 type File = {
@@ -51,7 +51,6 @@ const putFileInVercelServer = async (file: File) => {
 
   const blob = await put(file.name, contents, {
     access: "public",
-    addRandomSuffix: true,
   });
 
   return {
@@ -88,24 +87,18 @@ const putFileInS3Server = async ({
     throw new Error("Unsupported file type");
   }
 
-  const { client, config } = await getTeamS3ClientAndConfig(teamId);
+  const client = getS3Client();
 
   // Get the basename and extension for the file
   const { name, ext } = path.parse(file.name);
 
-  const slugifiedName = safeSlugify(name) + ext;
-  const originalFileName = `${name}${ext}`;
-  const key = `${teamId}/${docId}/${slugifiedName}`;
+  const key = `${teamId}/${docId}/${slugify(name)}${ext}`;
 
   const params = {
-    Bucket: config.bucket,
+    Bucket: process.env.NEXT_PRIVATE_UPLOAD_BUCKET,
     Key: key,
     Body: file.buffer,
     ContentType: file.type,
-    ContentDisposition: buildContentDisposition(
-      originalFileName,
-      slugifiedName,
-    ),
   };
 
   // Create a new instance of the PutObjectCommand with the parameters

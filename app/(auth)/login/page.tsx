@@ -1,7 +1,5 @@
 import { Metadata } from "next";
 
-import { GTMComponent } from "@/components/gtm-component";
-
 import LoginClient from "./page-client";
 
 const data = {
@@ -39,10 +37,5 @@ export const metadata: Metadata = {
 };
 
 export default function LoginPage() {
-  return (
-    <>
-      <GTMComponent />
-      <LoginClient />
-    </>
-  );
+  return <LoginClient />;
 }

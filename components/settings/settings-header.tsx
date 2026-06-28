@@ -1,21 +1,29 @@
-import { useFeatureFlags } from "@/lib/hooks/use-feature-flags";
-import { useIsAdmin } from "@/lib/hooks/use-is-admin";
-import { usePlan } from "@/lib/swr/use-billing";
+import { useTeam } from "@/context/team-context";
+import useSWR from "swr";
+
+import { fetcher } from "@/lib/utils";
 
 import { NavMenu } from "../navigation-menu";
 
 export function SettingsHeader() {
-  const { features } = useFeatureFlags();
-  const { isAdmin } = useIsAdmin();
-  const { isDatarooms, isTrial } = usePlan();
-  const hasTokensAccess = isDatarooms || isTrial || !!features?.tokens;
+  const teamInfo = useTeam();
+  const { data: features } = useSWR<{
+    tokens: boolean;
+    incomingWebhooks: boolean;
+    webhooks: boolean;
+  }>(
+    teamInfo?.currentTeam?.id
+      ? `/api/feature-flags?teamId=${teamInfo.currentTeam.id}`
+      : null,
+    fetcher,
+  );
 
   return (
     <header>
       <section className="mb-4 flex items-center justify-between md:mb-8 lg:mb-12">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
-            General Settings
+            Settings
           </h1>
           <p className="text-xs text-muted-foreground sm:text-sm">
             Manage your account settings
@@ -31,7 +39,7 @@ export function SettingsHeader() {
             segment: `general`,
           },
           {
-            label: "Team",
+            label: "People",
             href: `/settings/people`,
             segment: "people",
           },
@@ -51,53 +59,27 @@ export function SettingsHeader() {
             segment: "tags",
           },
           {
-            label: "Agreements",
-            href: `/settings/agreements`,
-            segment: "agreements",
-          },
-          {
-            label: "Webhooks",
-            href: `/settings/webhooks`,
-            segment: "webhooks",
-          },
-          {
-            label: "Notifications",
-            href: `/settings/notifications`,
-            segment: "notifications",
-          },
-          {
-            label: "Slack",
-            href: `/settings/slack`,
-            segment: "slack",
-          },
-          {
-            label: "AI",
-            href: `/settings/ai`,
-            segment: "ai",
-            disabled: !features?.ai,
+            label: "Billing",
+            href: `/settings/billing`,
+            segment: "billing",
           },
           {
             label: "Tokens",
             href: `/settings/tokens`,
             segment: "tokens",
-            disabled: !hasTokensAccess,
+            disabled: !features?.tokens,
           },
           {
-            label: "API",
+            label: "Webhooks",
+            href: `/settings/webhooks`,
+            segment: "webhooks",
+            disabled: !features?.webhooks,
+          },
+          {
+            label: "Incoming Webhooks",
             href: `/settings/incoming-webhooks`,
             segment: "incoming-webhooks",
             disabled: !features?.incomingWebhooks,
-          },
-          {
-            label: "Security",
-            href: `/settings/security`,
-            segment: "security",
-            disabled: !isAdmin,
-          },
-          {
-            label: "Billing",
-            href: `/settings/billing`,
-            segment: "billing",
           },
         ]}
       />

@@ -4,15 +4,6 @@ import { useRouter } from "next/router";
 import React, { useMemo } from "react";
 
 import {
-  useDataroom,
-  useDataroomFolderWithParents,
-} from "@/lib/swr/use-dataroom";
-import {
-  HIERARCHICAL_DISPLAY_STYLE,
-  useHierarchicalDisplayName,
-} from "@/lib/utils/hierarchical-display";
-
-import {
   Breadcrumb,
   BreadcrumbEllipsis,
   BreadcrumbItem,
@@ -28,70 +19,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-import { TruncatedBreadcrumbLink } from "../layouts/breadcrumb";
-
-const BreadcrumbFolderItem = ({
-  folder,
-  dataroomId,
-  isLast,
-}: {
-  folder: any;
-  dataroomId: string;
-  isLast: boolean;
-}) => {
-  const displayName = useHierarchicalDisplayName(
-    folder.name,
-    folder.hierarchicalIndex,
-  );
-
-  if (isLast) {
-    return (
-      <BreadcrumbPage
-        className="max-w-[200px] truncate"
-        style={HIERARCHICAL_DISPLAY_STYLE}
-      >
-        {displayName}
-      </BreadcrumbPage>
-    );
-  }
-
-  return (
-    <BreadcrumbLink asChild>
-      <Link
-        href={`/datarooms/${dataroomId}/documents${folder.path}`}
-        className="max-w-[200px] truncate"
-        style={HIERARCHICAL_DISPLAY_STYLE}
-      >
-        {displayName}
-      </Link>
-    </BreadcrumbLink>
-  );
-};
-
-const BreadcrumbDropdownItem = ({
-  folder,
-  dataroomId,
-}: {
-  folder: any;
-  dataroomId: string;
-}) => {
-  const displayName = useHierarchicalDisplayName(
-    folder.name,
-    folder.hierarchicalIndex,
-  );
-
-  return (
-    <DropdownMenuItem>
-      <Link
-        href={`/datarooms/${dataroomId}/documents${folder.path}`}
-        className="w-full"
-        style={HIERARCHICAL_DISPLAY_STYLE}
-      >
-        {displayName}
-      </Link>
-    </DropdownMenuItem>
-  );
-};
+import {
+  useDataroom,
+  useDataroomFolderWithParents,
+} from "@/lib/swr/use-dataroom";
 
 function BreadcrumbComponentBase({
   name,
@@ -116,10 +47,11 @@ function BreadcrumbComponentBase({
         </BreadcrumbItem>
         <BreadcrumbSeparator />
         <BreadcrumbItem>
-          <TruncatedBreadcrumbLink
-            href={`/datarooms/${dataroomId}/documents`}
-            text={dataroom?.name}
-          />
+          <BreadcrumbLink asChild>
+            <Link href={`/datarooms/${dataroomId}/documents`}>
+              {dataroom?.name || "Loading..."}
+            </Link>
+          </BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator />
         <BreadcrumbItem>
@@ -137,41 +69,54 @@ function BreadcrumbComponentBase({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
                   {folders.slice(0, -2).map((folder, index) => (
-                    <BreadcrumbDropdownItem
-                      key={index}
-                      folder={folder}
-                      dataroomId={dataroomId}
-                    />
+                    <DropdownMenuItem key={index}>
+                      <Link
+                        href={`/datarooms/${dataroomId}/documents${folder.path}`}
+                        className="w-full"
+                      >
+                        {folder.name}
+                      </Link>
+                    </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
-              <BreadcrumbFolderItem
-                folder={folders[folders.length - 2]}
-                dataroomId={dataroomId}
-                isLast={false}
-              />
+              <BreadcrumbLink asChild>
+                <Link
+                  href={`/datarooms/${dataroomId}/documents${folders[folders.length - 2].path}`}
+                  className="max-w-[200px] truncate"
+                >
+                  {folders[folders.length - 2].name}
+                </Link>
+              </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
-              <BreadcrumbFolderItem
-                folder={folders[folders.length - 1]}
-                dataroomId={dataroomId}
-                isLast={true}
-              />
+              <BreadcrumbPage className="max-w-[200px] truncate">
+                {folders[folders.length - 1].name}
+              </BreadcrumbPage>
             </BreadcrumbItem>
           </>
         ) : (
           folders?.map((folder, index) => (
             <React.Fragment key={index}>
               <BreadcrumbItem>
-                <BreadcrumbFolderItem
-                  folder={folder}
-                  dataroomId={dataroomId}
-                  isLast={index === folders.length - 1}
-                />
+                {index === folders.length - 1 ? (
+                  <BreadcrumbPage className="max-w-[200px] truncate">
+                    {folder.name}
+                  </BreadcrumbPage>
+                ) : (
+                  <BreadcrumbLink asChild>
+                    <Link
+                      href={`/datarooms/${dataroomId}/documents${folder.path}`}
+                      className="max-w-[200px] truncate"
+                    >
+                      {folder.name}
+                    </Link>
+                  </BreadcrumbLink>
+                )}
               </BreadcrumbItem>
               {index < folders.length - 1 && <BreadcrumbSeparator />}
             </React.Fragment>

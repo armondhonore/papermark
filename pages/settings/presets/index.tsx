@@ -11,12 +11,11 @@ import { CircleHelpIcon, CrownIcon, PlusIcon } from "lucide-react";
 import useSWR from "swr";
 
 import { usePlan } from "@/lib/swr/use-billing";
-import { fetcher, formatExpirationTime } from "@/lib/utils";
+import { fetcher } from "@/lib/utils";
 
 import { UpgradePlanModal } from "@/components/billing/upgrade-plan-modal";
 import AppLayout from "@/components/layouts/app";
 import { SettingsHeader } from "@/components/settings/settings-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BadgeTooltip } from "@/components/ui/tooltip";
 
@@ -24,7 +23,7 @@ export default function Presets() {
   const router = useRouter();
   const teamInfo = useTeam();
 
-  const { isBusiness, isDatarooms, isDataroomsPlus, isTrial } = usePlan();
+  const { isBusiness, isDatarooms, isDataroomsPlus } = usePlan();
 
   const {
     data: presets,
@@ -44,27 +43,27 @@ export default function Presets() {
       <main className="relative mx-2 mb-10 mt-4 space-y-8 overflow-hidden px-1 sm:mx-3 md:mx-5 md:mt-5 lg:mx-7 lg:mt-8 xl:mx-10">
         <SettingsHeader />
         <div>
-          <div className="mb-4 flex items-center justify-between gap-x-2 md:mb-8 lg:mb-12">
-            <div className="min-w-0 space-y-1">
-              <h3 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+          <div className="mb-4 flex items-center justify-between md:mb-8 lg:mb-12">
+            <div className="space-y-1">
+              <h3 className="text-2xl font-semibold tracking-tight text-foreground">
                 Link Presets
               </h3>
-              <p className="flex flex-row items-center gap-2 text-xs text-muted-foreground sm:text-sm">
+              <p className="flex flex-row items-center gap-2 text-sm text-muted-foreground">
                 Configure and save presets for your links
                 <BadgeTooltip content="Create reusable link configurations that can be applied to new links">
                   <CircleHelpIcon className="h-4 w-4 shrink-0 text-muted-foreground hover:text-foreground" />
                 </BadgeTooltip>
               </p>
             </div>
-            {isTrial || isBusiness || isDatarooms || isDataroomsPlus ? (
-              <Button onClick={() => router.push("/settings/presets/new")} className="shrink-0 whitespace-nowrap">
+            {isBusiness || isDatarooms || isDataroomsPlus ? (
+              <Button onClick={() => router.push("/settings/presets/new")}>
                 <PlusIcon className="mr-1.5 h-4 w-4" />
                 Create Preset
               </Button>
             ) : (
-              <Button onClick={() => setShowUpgradeModal(true)} className="shrink-0 whitespace-nowrap text-xs sm:text-sm">
+              <Button onClick={() => setShowUpgradeModal(true)}>
                 <CrownIcon className="mr-1.5 h-4 w-4" />
-                Upgrade
+                Upgrade to create presets
               </Button>
             )}
           </div>
@@ -86,7 +85,7 @@ export default function Presets() {
                   when creating links.
                 </p>
               </div>
-              {isTrial || isBusiness || isDatarooms || isDataroomsPlus ? (
+              {isBusiness || isDatarooms || isDataroomsPlus ? (
                 <Button
                   variant="outline"
                   onClick={() => router.push("/settings/presets/new")}

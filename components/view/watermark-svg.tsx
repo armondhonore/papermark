@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
 
+import Handlebars from "handlebars";
+
 import { WatermarkConfig } from "@/lib/types";
-import { safeTemplateReplace } from "@/lib/utils";
 
 export const SVGWatermark = ({
   config,
@@ -15,7 +16,8 @@ export const SVGWatermark = ({
   pageIndex: number;
 }) => {
   const watermarkText = useMemo(() => {
-    return safeTemplateReplace(config.text, viewerData);
+    const template = Handlebars.compile(config.text);
+    return template(viewerData);
   }, [config.text, viewerData]);
 
   const { width, height } = documentDimensions;

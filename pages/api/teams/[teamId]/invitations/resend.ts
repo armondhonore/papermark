@@ -29,12 +29,10 @@ export default async function handle(
 
     try {
       // check if currentUser is part of the team with the teamId
-      const userTeam = await prisma.userTeam.findUnique({
+      const userTeam = await prisma.userTeam.findFirst({
         where: {
-          userId_teamId: {
-            userId: (session.user as CustomUser).id,
-            teamId,
-          },
+          teamId,
+          userId: (session.user as CustomUser).id,
         },
       });
 
@@ -60,7 +58,7 @@ export default async function handle(
       });
 
       const expiresAt = new Date();
-      expiresAt.setHours(expiresAt.getHours() + 168); // invitation expires in 7 days
+      expiresAt.setHours(expiresAt.getHours() + 24); // invitation expires in 24 hour
 
       // update invitation
       const invitation = await prisma.invitation.update({

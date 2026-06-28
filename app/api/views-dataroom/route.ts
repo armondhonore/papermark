@@ -1,48 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { reportDeniedAccessAttempt } from "@/ee/features/access-notifications";
-import { getTeamStorageConfigById } from "@/ee/features/storage/config";
-import { ItemType, LinkAudienceType, LinkType } from "@prisma/client";
+import { authOptions } from "@/pages/api/auth/[...nextauth]";
+import { ItemType, LinkAudienceType } from "@prisma/client";
 import { ipAddress, waitUntil } from "@vercel/functions";
 import { getServerSession } from "next-auth";
+import { parsePageId } from "notion-utils";
 
 import { hashToken } from "@/lib/api/auth/token";
-import { authOptions } from "@/lib/auth/auth-options";
 import {
   DataroomSession,
-  collectFingerprintHeaders,
   createDataroomSession,
-  generateSessionFingerprint,
 } from "@/lib/auth/dataroom-auth";
 import { verifyDataroomSession } from "@/lib/auth/dataroom-auth";
 import { PreviewSession, verifyPreviewSession } from "@/lib/auth/preview-auth";
-import { isEmbeddableUrl } from "@/lib/edge-config/embeddable-domains";
 import { sendOtpVerificationEmail } from "@/lib/emails/send-email-otp-verification";
 import { getFile } from "@/lib/files/get-file";
 import { newId } from "@/lib/id-helper";
-import {
-  notifyDataroomAccess,
-  notifyDocumentView,
-} from "@/lib/integrations/slack/events";
+import notion from "@/lib/notion";
+import { addSignedUrls } from "@/lib/notion/utils";
 import prisma from "@/lib/prisma";
 import { ratelimit } from "@/lib/redis";
 import { parseSheet } from "@/lib/sheet";
-import {
-  getSignedAgreementAccessCookieName,
-  parseSignedAgreementAccessToken,
-} from "@/lib/signing/access-token";
-import {
-  ensureAgreementResponseForAccess,
-  normalizeSignerEmail,
-  normalizeSignerName,
-} from "@/lib/signing/agreements";
 import { recordLinkView } from "@/lib/tracking/record-link-view";
 import { CustomUser, WatermarkConfigSchema } from "@/lib/types";
 import { checkPassword, decryptEncrpytedPassword, log } from "@/lib/utils";
-import { extractEmailDomain, isEmailMatched } from "@/lib/utils/email-domain";
 import { generateOTP } from "@/lib/utils/generate-otp";
 import { LOCALHOST_IP } from "@/lib/utils/geo";
-import { checkGlobalBlockList } from "@/lib/utils/global-block-list";
 import { validateEmail } from "@/lib/utils/validate-email";
 
 export async function POST(request: NextRequest) {
@@ -58,11 +41,11 @@ export async function POST(request: NextRequest) {
       documentName,
       hasPages,
       ownerId,
+      dataroomVerified,
       linkType,
       dataroomViewId,
       viewType,
       groupId,
-      startPage,
       ...data
     } = body as {
       linkId: string;
@@ -73,24 +56,17 @@ export async function POST(request: NextRequest) {
       documentName: string | undefined;
       hasPages: boolean | undefined;
       ownerId: string | null;
+      dataroomVerified: boolean | undefined;
       linkType: string;
       dataroomViewId?: string;
       viewType: "DATAROOM_VIEW" | "DOCUMENT_VIEW";
       groupId?: string;
-      startPage?: number;
     };
 
-    const {
-      email,
-      password,
-      name,
-      agreementResponseId,
-      hasConfirmedAgreement,
-    } = data as {
+    const { email, password, name, hasConfirmedAgreement } = data as {
       email: string;
       password: string;
       name?: string;
-      agreementResponseId?: string;
       hasConfirmedAgreement?: boolean;
     };
 
@@ -122,8 +98,6 @@ export async function POST(request: NextRequest) {
         id: linkId,
       },
       select: {
-        id: true,
-        name: true,
         documentId: true,
         dataroomId: true,
         emailProtected: true,
@@ -132,26 +106,15 @@ export async function POST(request: NextRequest) {
         password: true,
         domainSlug: true,
         isArchived: true,
-        deletedAt: true,
         slug: true,
         domainId: true,
-        linkType: true,
         allowList: true,
         denyList: true,
         enableAgreement: true,
         agreementId: true,
-        agreement: {
-          select: {
-            id: true,
-            signingProvider: true,
-            contentType: true,
-            requireName: true,
-          },
-        },
         enableWatermark: true,
         watermarkConfig: true,
         groupId: true,
-        permissionGroupId: true,
         audienceType: true,
         allowDownload: true,
         enableConversation: true,
@@ -159,9 +122,6 @@ export async function POST(request: NextRequest) {
         team: {
           select: {
             plan: true,
-            globalBlockList: true,
-            agentsEnabled: true,
-            pauseStartsAt: true,
           },
         },
         customFields: {
@@ -171,23 +131,6 @@ export async function POST(request: NextRequest) {
           },
         },
         enableUpload: true,
-        uploadFolderIds: true,
-        dataroom: {
-          select: {
-            agentsEnabled: true,
-            isFrozen: true,
-            name: true,
-          },
-        },
-        visitorGroups: {
-          select: {
-            visitorGroup: {
-              select: {
-                emails: true,
-              },
-            },
-          },
-        },
       },
     });
 
@@ -202,53 +145,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (link.deletedAt) {
-      return NextResponse.json(
-        { message: "Link has been deleted." },
-        { status: 404 },
-      );
-    }
-
-    if (link.dataroom?.isFrozen) {
-      return NextResponse.json(
-        { message: "This data room has been closed." },
-        { status: 403 },
-      );
-    }
-
-    let isEmailVerified: boolean = false;
-    let hashedVerificationToken: string | null = null;
-    // Check if the user is part of the team and therefore skip verification steps
-    let isTeamMember: boolean = false;
-    let isPreview: boolean = false;
-    if (userId && previewToken) {
-      const session = await getServerSession(authOptions);
-      if (!session) {
-        return NextResponse.json(
-          { message: "You need to be logged in to preview the link." },
-          { status: 401 },
-        );
-      }
-
-      const sessionUserId = (session.user as CustomUser).id;
-      const teamMembership = await prisma.userTeam.findUnique({
-        where: {
-          userId_teamId: {
-            userId: sessionUserId,
-            teamId: link.teamId!,
-          },
-        },
-      });
-      if (teamMembership) {
-        isTeamMember = true;
-        isPreview = true;
-        isEmailVerified = true;
-      }
-    }
-
     // Check if there's a valid preview session
     let previewSession: PreviewSession | null = null;
-    if (!isPreview && previewToken) {
+    let isPreview: boolean = false;
+
+    if (previewToken) {
       const session = await getServerSession(authOptions);
       if (!session) {
         return NextResponse.json(
@@ -262,6 +163,7 @@ export async function POST(request: NextRequest) {
         linkId,
       );
 
+      console.log("previewSession", previewSession);
       if (!previewSession) {
         return NextResponse.json(
           {
@@ -281,60 +183,15 @@ export async function POST(request: NextRequest) {
         linkId,
         link.dataroomId!,
       );
-
-      // If we have a dataroom session, use its verified status
-      if (dataroomSession) {
-        isEmailVerified = dataroomSession.verified;
-      }
     }
 
-    let effectiveEmail = normalizeSignerEmail(email);
-    let effectiveName = normalizeSignerName(name);
-
-    const signedAccessCookieValue =
-      link.enableAgreement && link.agreement
-        ? request.cookies.get(getSignedAgreementAccessCookieName(linkId))?.value
-        : undefined;
-    const signedAccessPayload = parseSignedAgreementAccessToken(
-      signedAccessCookieValue,
-    );
-    const cookieAgreementResponseId =
-      link.enableAgreement &&
-      link.agreement &&
-      signedAccessPayload &&
-      signedAccessPayload.linkId === linkId &&
-      signedAccessPayload.agreementId === link.agreement.id
-        ? signedAccessPayload.agreementResponseId
-        : null;
-
-    let verifiedAgreementResponse: Awaited<
-      ReturnType<typeof ensureAgreementResponseForAccess>
-    > | null = null;
-
+    let isEmailVerified: boolean = false;
+    let hashedVerificationToken: string | null = null;
     // If there is no session, then we need to check if the link is protected and enforce the checks
     if (!dataroomSession && !isPreview) {
-      if (cookieAgreementResponseId && link.enableAgreement && link.agreement) {
-        try {
-          verifiedAgreementResponse = await ensureAgreementResponseForAccess({
-            agreement: link.agreement,
-            linkId,
-            agreementResponseId: cookieAgreementResponseId,
-            skipSignerIdentityCheck: true,
-          });
-          effectiveEmail =
-            normalizeSignerEmail(verifiedAgreementResponse.signerEmail) ??
-            effectiveEmail;
-          effectiveName =
-            normalizeSignerName(verifiedAgreementResponse.signerName) ??
-            effectiveName;
-        } catch {
-          // Continue with the submitted identity; the agreement gate below will fail closed if needed.
-        }
-      }
-
       // Check if email is required for visiting the link
       if (link.emailProtected) {
-        if (!effectiveEmail || effectiveEmail.trim() === "") {
+        if (!email || email.trim() === "") {
           return NextResponse.json(
             { message: "Email is required." },
             { status: 400 },
@@ -342,7 +199,7 @@ export async function POST(request: NextRequest) {
         }
 
         // validate email
-        if (!validateEmail(effectiveEmail)) {
+        if (!validateEmail(email)) {
           return NextResponse.json(
             { message: "Invalid email address." },
             { status: 400 },
@@ -376,97 +233,29 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Fail closed when an agreement is required but not configured, to avoid silently granting access.
-      if (link.enableAgreement && !link.agreement) {
+      // Check if agreement is required for visiting the link
+      if (link.enableAgreement && !hasConfirmedAgreement) {
         return NextResponse.json(
-          { message: "Agreement is required but not configured." },
-          { status: 500 },
-        );
-      }
-
-      if (
-        link.enableAgreement &&
-        link.agreement &&
-        !verifiedAgreementResponse
-      ) {
-        const resolvedAgreementResponseId =
-          agreementResponseId ?? cookieAgreementResponseId ?? undefined;
-
-        const hasCookieIdentityProof =
-          !!cookieAgreementResponseId &&
-          (!agreementResponseId ||
-            agreementResponseId === cookieAgreementResponseId);
-
-        try {
-          verifiedAgreementResponse = await ensureAgreementResponseForAccess({
-            agreement: link.agreement,
-            linkId,
-            agreementResponseId: resolvedAgreementResponseId,
-            hasConfirmedAgreement,
-            signerEmail: effectiveEmail,
-            signerName: effectiveName,
-            requireSignerEmail: link.emailProtected,
-            skipSignerIdentityCheck: hasCookieIdentityProof,
-          });
-          effectiveEmail =
-            normalizeSignerEmail(verifiedAgreementResponse.signerEmail) ??
-            effectiveEmail;
-          effectiveName =
-            normalizeSignerName(verifiedAgreementResponse.signerName) ??
-            effectiveName;
-        } catch (error) {
-          return NextResponse.json(
-            {
-              message:
-                error instanceof Error
-                  ? error.message
-                  : "Agreement signing is required.",
-            },
-            { status: 400 },
-          );
-        }
-      }
-
-      // Check global block list first - this overrides all other access controls
-      const globalBlockCheck = checkGlobalBlockList(
-        effectiveEmail ?? undefined,
-        link.team?.globalBlockList,
-      );
-      if (globalBlockCheck.error) {
-        return NextResponse.json(
-          { message: globalBlockCheck.error },
+          { message: "Agreement to NDA is required." },
           { status: 400 },
         );
       }
-      if (globalBlockCheck.isBlocked) {
-        waitUntil(
-          reportDeniedAccessAttempt(link, effectiveEmail ?? "", "global"),
-        );
-
-        return NextResponse.json({ message: "Access denied" }, { status: 403 });
-      }
-
-      // Build combined allow list from individual emails + visitor groups
-      const visitorGroupEmails =
-        link.visitorGroups?.flatMap((vg) => vg.visitorGroup.emails) || [];
-      const combinedAllowList = [
-        ...(link.allowList || []),
-        ...visitorGroupEmails,
-      ];
 
       // Check if email is allowed to visit the link
-      if (combinedAllowList.length > 0) {
+      if (link.allowList && link.allowList.length > 0) {
+        // Extract the domain from the email address
+        const emailDomain = email.substring(email.lastIndexOf("@"));
+
         // Determine if the email or its domain is allowed
-        const isAllowed = combinedAllowList.some((allowed) =>
-          isEmailMatched(effectiveEmail ?? "", allowed),
-        );
+        const isAllowed = link.allowList.some((allowed) => {
+          return (
+            allowed === email ||
+            (allowed.startsWith("@") && emailDomain === allowed)
+          );
+        });
 
         // Deny access if the email is not allowed
         if (!isAllowed) {
-          waitUntil(
-            reportDeniedAccessAttempt(link, effectiveEmail ?? "", "allow"),
-          );
-
           return NextResponse.json(
             { message: "Unauthorized access" },
             { status: 403 },
@@ -476,17 +265,19 @@ export async function POST(request: NextRequest) {
 
       // Check if email is denied to visit the link
       if (link.denyList && link.denyList.length > 0) {
+        // Extract the domain from the email address
+        const emailDomain = email.substring(email.lastIndexOf("@"));
+
         // Determine if the email or its domain is denied
-        const isDenied = link.denyList.some((denied) =>
-          isEmailMatched(effectiveEmail ?? "", denied),
-        );
+        const isDenied = link.denyList.some((denied) => {
+          return (
+            denied === email ||
+            (denied.startsWith("@") && emailDomain === denied)
+          );
+        });
 
         // Deny access if the email is denied
         if (isDenied) {
-          waitUntil(
-            reportDeniedAccessAttempt(link, effectiveEmail ?? "", "deny"),
-          );
-
           return NextResponse.json(
             { message: "Unauthorized access" },
             { status: 403 },
@@ -518,20 +309,17 @@ export async function POST(request: NextRequest) {
         } else {
           // Check individual membership
           const isMember = group.members.some(
-            (member) => member.viewer.email === effectiveEmail,
+            (member) => member.viewer.email === email,
           );
 
           // Extract domain from email
-          const emailDomain = extractEmailDomain(effectiveEmail ?? "");
+          const emailDomain = email.substring(email.lastIndexOf("@"));
           // Check domain access
-          const hasDomainAccess = emailDomain
-            ? group.domains.some((domain) => domain === emailDomain)
-            : false;
+          const hasDomainAccess = group.domains.some(
+            (domain) => domain === emailDomain,
+          );
 
           if (!isMember && !hasDomainAccess) {
-            waitUntil(
-              reportDeniedAccessAttempt(link, effectiveEmail ?? "", "allow"),
-            );
             return NextResponse.json(
               { message: "Unauthorized access" },
               { status: 403 },
@@ -543,24 +331,9 @@ export async function POST(request: NextRequest) {
       // Request OTP Code for email verification if
       // 1) email verification is required and
       // 2) code is not provided or token not provided
-      if (link.emailAuthenticated && !code && !token) {
+      if (link.emailAuthenticated && !code && !token && !dataroomVerified) {
         const ipAddressValue = ipAddress(request);
 
-        // Rate limit per email/link combination (1 per 30 seconds) to prevent OTP flooding
-        const { success: emailLimitSuccess } = await ratelimit(1, "30 s").limit(
-          `send-otp:${linkId}:${effectiveEmail}`,
-        );
-        if (!emailLimitSuccess) {
-          return NextResponse.json(
-            {
-              message:
-                "Please wait before requesting another code. Try again in 30 seconds.",
-            },
-            { status: 429 },
-          );
-        }
-
-        // Additional IP-based rate limit (10 per minute) to prevent abuse across different emails
         const { success } = await ratelimit(10, "1 m").limit(
           `send-otp:${ipAddressValue}`,
         );
@@ -573,7 +346,7 @@ export async function POST(request: NextRequest) {
 
         await prisma.verificationToken.deleteMany({
           where: {
-            identifier: `otp:${linkId}:${effectiveEmail}`,
+            identifier: `otp:${linkId}:${email}`,
           },
         });
 
@@ -584,19 +357,12 @@ export async function POST(request: NextRequest) {
         await prisma.verificationToken.create({
           data: {
             token: otpCode,
-            identifier: `otp:${linkId}:${effectiveEmail}`,
+            identifier: `otp:${linkId}:${email}`,
             expires: expiresAt,
           },
         });
 
-        waitUntil(
-          sendOtpVerificationEmail(
-            effectiveEmail ?? "",
-            otpCode,
-            true,
-            link.teamId!,
-          ),
-        );
+        waitUntil(sendOtpVerificationEmail(email, otpCode, true));
         return NextResponse.json(
           {
             type: "email-verification",
@@ -606,7 +372,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      if (link.emailAuthenticated && code) {
+      if (link.emailAuthenticated && code && !dataroomVerified) {
         const ipAddressValue = ipAddress(request);
         const { success } = await ratelimit(10, "1 m").limit(
           `verify-otp:${ipAddressValue}`,
@@ -622,7 +388,7 @@ export async function POST(request: NextRequest) {
         const verification = await prisma.verificationToken.findUnique({
           where: {
             token: code,
-            identifier: `otp:${linkId}:${effectiveEmail}`,
+            identifier: `otp:${linkId}:${email}`,
           },
         });
 
@@ -667,7 +433,7 @@ export async function POST(request: NextRequest) {
         await prisma.verificationToken.create({
           data: {
             token: hashedVerificationToken,
-            identifier: `link-verification:${linkId}:${link.teamId}:${effectiveEmail}`,
+            identifier: `link-verification:${linkId}:${link.teamId}:${email}`,
             expires: tokenExpiresAt,
           },
         });
@@ -675,7 +441,7 @@ export async function POST(request: NextRequest) {
         isEmailVerified = true;
       }
 
-      if (link.emailAuthenticated && token) {
+      if (link.emailAuthenticated && token && !dataroomVerified) {
         const ipAddressValue = ipAddress(request);
         const { success } = await ratelimit(10, "1 m").limit(
           `verify-email:${ipAddressValue}`,
@@ -691,7 +457,7 @@ export async function POST(request: NextRequest) {
         const verification = await prisma.verificationToken.findUnique({
           where: {
             token: token,
-            identifier: `link-verification:${linkId}:${link.teamId}:${effectiveEmail}`,
+            identifier: `link-verification:${linkId}:${link.teamId}:${email}`,
           },
         });
 
@@ -724,47 +490,23 @@ export async function POST(request: NextRequest) {
 
         isEmailVerified = true;
       }
-    }
 
-    if (
-      !verifiedAgreementResponse &&
-      cookieAgreementResponseId &&
-      link.enableAgreement &&
-      link.agreement
-    ) {
-      try {
-        verifiedAgreementResponse = await ensureAgreementResponseForAccess({
-          agreement: link.agreement,
-          linkId,
-          agreementResponseId: cookieAgreementResponseId,
-          skipSignerIdentityCheck: true,
-        });
-        effectiveEmail =
-          normalizeSignerEmail(verifiedAgreementResponse.signerEmail) ??
-          effectiveEmail;
-        effectiveName =
-          normalizeSignerName(verifiedAgreementResponse.signerName) ??
-          effectiveName;
-      } catch {
-        // Existing dataroom sessions still grant access; ignore stale signed identity cookies.
+      if (link.emailAuthenticated && dataroomVerified) {
+        isEmailVerified = true;
       }
     }
-
-    const hasSignedAgreementIdentity = !!normalizeSignerEmail(
-      verifiedAgreementResponse?.signerEmail,
-    );
 
     let viewer: { id: string; email: string; verified: boolean } | null = null;
     if (!isPreview) {
       if (!dataroomSession) {
-        if (effectiveEmail) {
+        if (email) {
           // find or create a viewer
           console.time("find-viewer");
           viewer = await prisma.viewer.findUnique({
             where: {
               teamId_email: {
                 teamId: link.teamId!,
-                email: effectiveEmail,
+                email: email,
               },
             },
             select: { id: true, email: true, verified: true },
@@ -775,7 +517,7 @@ export async function POST(request: NextRequest) {
             console.time("create-viewer");
             viewer = await prisma.viewer.create({
               data: {
-                email: effectiveEmail,
+                email: email,
                 verified: isEmailVerified,
                 teamId: link.teamId!,
               },
@@ -791,33 +533,6 @@ export async function POST(request: NextRequest) {
             select: { id: true, email: true, verified: true },
           });
         }
-
-        if (
-          hasSignedAgreementIdentity &&
-          effectiveEmail &&
-          (!viewer || viewer.email.toLowerCase() !== effectiveEmail)
-        ) {
-          viewer = await prisma.viewer.findUnique({
-            where: {
-              teamId_email: {
-                teamId: link.teamId!,
-                email: effectiveEmail,
-              },
-            },
-            select: { id: true, email: true, verified: true },
-          });
-
-          if (!viewer) {
-            viewer = await prisma.viewer.create({
-              data: {
-                email: effectiveEmail,
-                verified: isEmailVerified,
-                teamId: link.teamId!,
-              },
-              select: { id: true, email: true, verified: true },
-            });
-          }
-        }
       }
 
       if (viewer && !viewer.verified && isEmailVerified) {
@@ -825,44 +540,27 @@ export async function POST(request: NextRequest) {
           where: { id: viewer.id },
           data: { verified: isEmailVerified },
         });
-        // Update the viewer object to reflect the new verified status
-        viewer.verified = isEmailVerified;
-      }
-
-      if (dataroomSession?.viewId && hasSignedAgreementIdentity && viewer) {
-        await prisma.view.updateMany({
-          where: {
-            id: dataroomSession.viewId,
-            linkId,
-            dataroomId: link.dataroomId,
-            viewType: "DATAROOM_VIEW",
-          },
-          data: {
-            viewerEmail: viewer.email,
-            viewerName: effectiveName ?? undefined,
-            viewerId: viewer.id,
-            verified: viewer.verified || isEmailVerified,
-          },
-        });
       }
     }
-
-    const shouldRefreshDataroomSession = Boolean(
-      dataroomSession &&
-      hasSignedAgreementIdentity &&
-      viewer &&
-      dataroomSession.viewerId !== viewer.id,
-    );
 
     // Common fields for the view object shared between DATAROOM_VIEW and DOCUMENT_VIEW
     const viewFields = {
       linkId: linkId,
-      viewerEmail: viewer?.email ?? effectiveEmail,
-      viewerName: effectiveName,
+      viewerEmail: viewer?.email ?? email,
+      viewerName: name,
       verified: isEmailVerified,
       dataroomId: link.dataroomId,
       viewerId: viewer?.id ?? undefined,
       teamId: link.teamId,
+      ...(link.enableAgreement &&
+        link.agreementId &&
+        hasConfirmedAgreement && {
+          agreementResponse: {
+            create: {
+              agreementId: link.agreementId,
+            },
+          },
+        }),
       ...(link.audienceType === LinkAudienceType.GROUP &&
         link.groupId && {
           groupId: link.groupId,
@@ -881,13 +579,9 @@ export async function POST(request: NextRequest) {
         }),
     };
 
-    const isPaused =
-      link.team?.pauseStartsAt && link.team?.pauseStartsAt <= new Date()
-        ? true
-        : false;
-
     // ** DATAROOM_VIEW **
     if (viewType === "DATAROOM_VIEW") {
+      console.log("viewType is DATAROOM_VIEW");
       try {
         let newDataroomView: { id: string } | null = null;
         if (!isPreview) {
@@ -897,17 +591,6 @@ export async function POST(request: NextRequest) {
               data: { ...viewFields, viewType: "DATAROOM_VIEW" },
               select: { id: true },
             });
-
-            if (verifiedAgreementResponse) {
-              await prisma.agreementResponse.update({
-                where: {
-                  id: verifiedAgreementResponse.id,
-                },
-                data: {
-                  viewId: newDataroomView.id,
-                },
-              });
-            }
             console.timeEnd("create-view");
           }
         }
@@ -921,64 +604,15 @@ export async function POST(request: NextRequest) {
               clickId: newId("linkView"),
               viewId: newDataroomView.id,
               linkId,
-              dataroomId: link.dataroomId!,
+              dataroomId,
               teamId: link.teamId!,
               enableNotification: link.enableNotification,
-              isPaused,
             }),
           );
-
-          if (link.teamId && !isPreview) {
-            waitUntil(
-              (async () => {
-                try {
-                  await notifyDataroomAccess({
-                    teamId: link.teamId!,
-                    dataroomId: link.dataroomId!,
-                    linkId,
-                    viewerEmail: effectiveEmail ?? verifiedEmail ?? undefined,
-                    viewerId: viewer?.id,
-                    teamIsPaused: isPaused,
-                  });
-                } catch (error) {
-                  console.error("Error sending Slack notification:", error);
-                }
-              })(),
-            );
-          }
         }
 
         const dataroomViewId =
           newDataroomView?.id ?? dataroomSession?.viewId ?? undefined;
-
-        // Resolve the upload-destination allow-list so the visitor UI can
-        // surface exactly which folders they may target. Null/empty = no
-        // restriction (visitor may upload into any folder they're in).
-        let uploadFolderAllowList:
-          | { id: string; name: string; path: string }[]
-          | null = null;
-        if (link.enableUpload) {
-          const allowedIds = Array.isArray(link.uploadFolderIds)
-            ? link.uploadFolderIds.filter(
-                (id): id is string => typeof id === "string" && !!id,
-              )
-            : [];
-          if (allowedIds.length > 0) {
-            const folders = await prisma.dataroomFolder.findMany({
-              where: {
-                id: { in: allowedIds },
-                dataroomId: link.dataroomId!,
-              },
-              select: { id: true, name: true, path: true },
-            });
-            const byId = new Map(folders.map((f) => [f.id, f]));
-            uploadFolderAllowList = allowedIds
-              .map((id) => byId.get(id))
-              .filter(
-                (f): f is { id: string; name: string; path: string } => !!f,
-              );
-          }
-        }
 
         const returnObject = {
           message: "Dataroom View recorded",
@@ -991,33 +625,18 @@ export async function POST(request: NextRequest) {
           viewerId: viewer?.id,
           conversationsEnabled: link.enableConversation,
           enableVisitorUpload: link.enableUpload,
-          uploadFolderAllowList,
-          agentsEnabled: link.dataroom?.agentsEnabled ?? false,
-          dataroomName: link.dataroom?.name,
-          ...(isTeamMember && { isTeamMember: true }),
         };
 
         const response = NextResponse.json(returnObject, { status: 200 });
 
-        // Create or refresh the dataroom session token when the signed identity is canonical.
-        if ((!dataroomSession || shouldRefreshDataroomSession) && !isPreview) {
-          const sessionViewId = newDataroomView?.id ?? dataroomSession?.viewId;
-
-          if (!sessionViewId) {
-            return response;
-          }
-
-          const fingerprint = generateSessionFingerprint(
-            collectFingerprintHeaders(request.headers),
-          );
+        // Create a dataroom session token if a dataroom session doesn't exist yet
+        if (!dataroomSession && !isPreview) {
           const newDataroomSession = await createDataroomSession(
-            link.dataroomId!,
+            dataroomId,
             linkId,
-            sessionViewId,
+            newDataroomView?.id!,
             ipAddress(request) ?? LOCALHOST_IP,
-            isEmailVerified,
             viewer?.id,
-            fingerprint,
           );
 
           let basePath = `/view/${linkId}`;
@@ -1058,133 +677,6 @@ export async function POST(request: NextRequest) {
 
     // ** DOCUMENT_VIEW **
     try {
-      if (!documentVersionId) {
-        return NextResponse.json(
-          { message: "Document version ID is required." },
-          { status: 400 },
-        );
-      }
-
-      const documentVersionAccess = await prisma.documentVersion.findUnique({
-        where: { id: documentVersionId },
-        select: { documentId: true },
-      });
-
-      if (!documentVersionAccess) {
-        return NextResponse.json(
-          { message: "Document version not found." },
-          { status: 404 },
-        );
-      }
-
-      const effectiveGroupId = link.groupId || link.permissionGroupId;
-      let dataroomDocument: { id: string } | null = null;
-      let dataroomDocumentPermission: {
-        canView: boolean;
-        canDownload: boolean;
-      } | null = null;
-
-      if (link.linkType !== LinkType.DATAROOM_LINK || !link.dataroomId) {
-        return NextResponse.json(
-          { message: "Unauthorized access." },
-          { status: 403 },
-        );
-      }
-
-      dataroomDocument = await prisma.dataroomDocument.findUnique({
-        where: {
-          dataroomId_documentId: {
-            dataroomId: link.dataroomId,
-            documentId: documentVersionAccess.documentId,
-          },
-        },
-        select: { id: true },
-      });
-
-      if (!dataroomDocument) {
-        return NextResponse.json(
-          { message: "Unauthorized access." },
-          { status: 403 },
-        );
-      }
-
-      if (effectiveGroupId) {
-        if (link.groupId) {
-          dataroomDocumentPermission =
-            await prisma.viewerGroupAccessControls.findUnique({
-              where: {
-                groupId_itemId: {
-                  groupId: link.groupId,
-                  itemId: dataroomDocument.id,
-                },
-                itemType: ItemType.DATAROOM_DOCUMENT,
-              },
-              select: { canView: true, canDownload: true },
-            });
-        } else if (link.permissionGroupId) {
-          dataroomDocumentPermission =
-            await prisma.permissionGroupAccessControls.findUnique({
-              where: {
-                groupId_itemId: {
-                  groupId: link.permissionGroupId,
-                  itemId: dataroomDocument.id,
-                },
-                itemType: ItemType.DATAROOM_DOCUMENT,
-              },
-              select: { canView: true, canDownload: true },
-            });
-        }
-
-        if (
-          !dataroomDocumentPermission?.canView &&
-          !dataroomDocumentPermission?.canDownload
-        ) {
-          // Fallback: viewer-uploaded docs aren't tied to the link's
-          // permission group, so allow the original uploader through. Gated
-          // on a verified session (or NextAuth team-member preview) to
-          // prevent unverified callers from claiming an upload's viewerId.
-          const allowUploadFallback = isEmailVerified || isTeamMember;
-          const ownerViewerId = viewer?.id ?? dataroomSession?.viewerId;
-          const viewerUpload =
-            ownerViewerId || isTeamMember
-              ? await prisma.documentUpload.findFirst({
-                  where: {
-                    linkId,
-                    dataroomDocumentId: dataroomDocument.id,
-                    ...(ownerViewerId && !isTeamMember
-                      ? { viewerId: ownerViewerId }
-                      : {}),
-                  },
-                  select: { id: true },
-                })
-              : null;
-
-          if (!viewerUpload) {
-            return NextResponse.json(
-              { message: "Unauthorized access." },
-              { status: 403 },
-            );
-          }
-
-          if (!allowUploadFallback) {
-            // Trigger inline OTP re-auth. Echoing the email back is safe
-            // here — the caller supplied it on the access form.
-            return NextResponse.json(
-              {
-                message: "Email verification required to access your upload.",
-                requiresVerification: "viewer-upload",
-                email: viewer?.email ?? null,
-              },
-              { status: 401 },
-            );
-          }
-
-          // Per-link `allowDownload` still gates the download UI downstream.
-          dataroomDocumentPermission = { canView: true, canDownload: true };
-        }
-      }
-
-      const resolvedDocumentId = documentVersionAccess.documentId;
       let newView: { id: string } | null = null;
       let dataroomView: { id: string } | null = null;
       if (!isPreview) {
@@ -1192,21 +684,13 @@ export async function POST(request: NextRequest) {
 
         // if dataroomSession is not present, create a dataroom view first
         if (!dataroomSession) {
+          console.log(
+            "no dataroom session present, creating new dataroom view",
+          );
           dataroomView = await prisma.view.create({
             data: { ...viewFields, viewType: "DATAROOM_VIEW" },
             select: { id: true },
           });
-
-          if (verifiedAgreementResponse) {
-            await prisma.agreementResponse.update({
-              where: {
-                id: verifiedAgreementResponse.id,
-              },
-              data: {
-                viewId: dataroomView.id,
-              },
-            });
-          }
 
           waitUntil(
             // Record link view in Tinybird
@@ -1215,10 +699,9 @@ export async function POST(request: NextRequest) {
               clickId: newId("linkView"),
               viewId: dataroomView.id,
               linkId,
-              dataroomId: link.dataroomId!,
+              dataroomId,
               teamId: link.teamId!,
               enableNotification: link.enableNotification,
-              isPaused,
             }),
           );
         }
@@ -1227,7 +710,7 @@ export async function POST(request: NextRequest) {
         newView = await prisma.view.create({
           data: {
             ...viewFields,
-            documentId: resolvedDocumentId,
+            documentId: documentId,
             dataroomViewId:
               dataroomSession?.viewId ?? dataroomView?.id ?? dataroomViewId,
             viewType: "DOCUMENT_VIEW",
@@ -1235,33 +718,15 @@ export async function POST(request: NextRequest) {
           select: { id: true },
         });
         console.timeEnd("create-view");
-        // Only send Slack notifications for non-preview views
-        if (link.teamId && !isPreview) {
-          waitUntil(
-            (async () => {
-              try {
-                await notifyDocumentView({
-                  teamId: link.teamId!,
-                  documentId: resolvedDocumentId,
-                  dataroomId: link.dataroomId!,
-                  linkId,
-                  viewerEmail: effectiveEmail ?? verifiedEmail ?? undefined,
-                  viewerId: viewer?.id,
-                  teamIsPaused: isPaused,
-                });
-              } catch (error) {
-                console.error("Error sending Slack notification:", error);
-              }
-            })(),
-          );
-        }
       }
 
       // if document version has pages, then return pages
+      // otherwise, check if notion document,
+      // if notion, return recordMap and theme from document version file
       // otherwise, return file from document version
       let documentPages, documentVersion;
+      let recordMap, theme;
       let sheetData;
-      const INITIAL_PAGES_TO_LOAD = 10;
 
       if (hasPages) {
         // get pages from document version
@@ -1279,28 +744,12 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        // Sign URLs for pages around the requested start page (or page 1 by default).
-        // Remaining page URLs are fetched on-demand by the client via /api/views/pages.
-        const centerIndex = Math.min(
-          Math.max(0, (startPage ?? 1) - 1),
-          Math.max(0, documentPages.length - 1),
-        );
-        const halfWindow = Math.floor(INITIAL_PAGES_TO_LOAD / 2);
-        const signStart = Math.max(0, centerIndex - halfWindow);
-        const signEnd = Math.min(
-          documentPages.length,
-          signStart + INITIAL_PAGES_TO_LOAD,
-        );
-
         documentPages = await Promise.all(
-          documentPages.map(async (page, index) => {
+          documentPages.map(async (page) => {
             const { storageType, ...otherPage } = page;
             return {
               ...otherPage,
-              file:
-                index >= signStart && index < signEnd
-                  ? await getFile({ data: page.file, type: storageType })
-                  : null,
+              file: await getFile({ data: page.file, type: storageType }),
             };
           }),
         );
@@ -1335,24 +784,34 @@ export async function POST(request: NextRequest) {
             type: documentVersion.storageType,
           });
         }
-        // For link documents, the file is already a URL, no processing needed
+
+        if (documentVersion.type === "notion") {
+          // get theme `mode` param from document version file
+          const modeMatch = documentVersion.file.match(/[?&]mode=(dark|light)/);
+          theme = modeMatch ? modeMatch[1] : undefined;
+
+          let notionPageId = parsePageId(documentVersion.file, { uuid: false });
+          if (!notionPageId) {
+            notionPageId = "";
+          }
+
+          const pageId = notionPageId;
+          recordMap = await notion.getPage(pageId, { signFileUrls: false });
+          // TODO: separately sign the file urls until PR merged and published; ref: https://github.com/NotionX/react-notion-x/issues/580#issuecomment-2542823817
+          await addSignedUrls({ recordMap });
+        }
+
         if (documentVersion.type === "sheet") {
           const document = await prisma.document.findUnique({
-            where: { id: resolvedDocumentId },
+            where: { id: documentId },
             select: { advancedExcelEnabled: true },
           });
           useAdvancedExcelViewer = document?.advancedExcelEnabled ?? false;
 
           if (useAdvancedExcelViewer) {
-            if (documentVersion.file.includes("https://")) {
-              documentVersion.file = documentVersion.file;
-            } else {
-              // Get team-specific storage config for advanced distribution host
-              const storageConfig = await getTeamStorageConfigById(
-                link.teamId!,
-              );
-              documentVersion.file = `https://${storageConfig.advancedDistributionHost}/${documentVersion.file}`;
-            }
+            documentVersion.file = documentVersion.file.includes("https://")
+              ? documentVersion.file
+              : `https://${process.env.NEXT_PRIVATE_ADVANCED_UPLOAD_DISTRIBUTION_HOST}/${documentVersion.file}`;
           } else {
             const fileUrl = await getFile({
               data: documentVersion.file,
@@ -1368,21 +827,39 @@ export async function POST(request: NextRequest) {
 
       // check if viewer can download the document based on group permissions
       let canDownload: boolean = link.allowDownload ?? false;
-
       if (
         link.allowDownload &&
-        (link.audienceType === LinkAudienceType.GROUP ||
-          link.permissionGroupId) &&
-        effectiveGroupId &&
-        dataroomDocument
+        link.audienceType === LinkAudienceType.GROUP &&
+        link.groupId &&
+        documentId &&
+        dataroomId
       ) {
-        canDownload = dataroomDocumentPermission?.canDownload ?? false;
+        const dataroomDocument = await prisma.dataroomDocument.findUnique({
+          where: {
+            dataroomId_documentId: {
+              dataroomId: dataroomId,
+              documentId: documentId,
+            },
+          },
+          select: { id: true },
+        });
+        if (!dataroomDocument) {
+          canDownload = false;
+        } else {
+          const groupDocumentPermission =
+            await prisma.viewerGroupAccessControls.findUnique({
+              where: {
+                groupId_itemId: {
+                  groupId: link.groupId,
+                  itemId: dataroomDocument.id,
+                },
+                itemType: ItemType.DATAROOM_DOCUMENT,
+              },
+              select: { canDownload: true },
+            });
+          canDownload = groupDocumentPermission?.canDownload ?? false;
+        }
       }
-
-      const isLinkType = documentVersion?.type === "link";
-      const isEmbeddable = isLinkType
-        ? await isEmbeddableUrl(documentVersion?.file)
-        : false;
 
       const returnObject = {
         message: "View recorded",
@@ -1393,13 +870,12 @@ export async function POST(request: NextRequest) {
             (documentVersion.type === "pdf" ||
               documentVersion.type === "image" ||
               documentVersion.type === "zip" ||
-              documentVersion.type === "video" ||
-              documentVersion.type === "link")) ||
+              documentVersion.type === "video")) ||
           (documentVersion && useAdvancedExcelViewer)
             ? documentVersion.file
             : undefined,
         pages: documentPages ? documentPages : undefined,
-        notionData: undefined,
+        notionData: recordMap ? { recordMap, theme } : undefined,
         sheetData:
           documentVersion &&
           documentVersion.type === "sheet" &&
@@ -1410,11 +886,13 @@ export async function POST(request: NextRequest) {
           ? documentVersion.type
           : documentPages
             ? "pdf"
-            : undefined,
+            : recordMap
+              ? "notion"
+              : undefined,
         watermarkConfig: link.enableWatermark
           ? link.watermarkConfig
           : undefined,
-        viewerEmail: viewer?.email ?? effectiveEmail ?? verifiedEmail ?? null,
+        viewerEmail: viewer?.email ?? email ?? verifiedEmail ?? null,
         ipAddress:
           link.enableWatermark &&
           link.watermarkConfig &&
@@ -1432,33 +910,18 @@ export async function POST(request: NextRequest) {
         canDownload: canDownload,
         viewerId: viewer?.id,
         conversationsEnabled: link.enableConversation,
-        agentsEnabled: link.dataroom?.agentsEnabled ?? false,
-        dataroomName: link.dataroom?.name,
-        ...(isTeamMember && { isTeamMember: true }),
-        ...(isEmbeddable && { isEmbeddable: true }),
       };
 
       const response = NextResponse.json(returnObject, { status: 200 });
 
-      // Create or refresh the dataroom session token when the signed identity is canonical.
-      if ((!dataroomSession || shouldRefreshDataroomSession) && !isPreview) {
-        const sessionViewId = dataroomView?.id ?? dataroomSession?.viewId;
-
-        if (!sessionViewId) {
-          return response;
-        }
-
-        const fingerprint = generateSessionFingerprint(
-          collectFingerprintHeaders(request.headers),
-        );
+      // Create a dataroom session token if a dataroom session doesn't exist yet// Create a dataroom session token if a dataroom session doesn't exist yet
+      if (!dataroomSession && !isPreview) {
         const newDataroomSession = await createDataroomSession(
-          link.dataroomId!,
+          dataroomId,
           linkId,
-          sessionViewId,
+          dataroomView?.id!,
           ipAddress(request) ?? LOCALHOST_IP,
-          isEmailVerified,
           viewer?.id,
-          fingerprint,
         );
 
         let basePath = `/view/${linkId}`;

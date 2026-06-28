@@ -1,9 +1,3 @@
-import {
-  sendConversationMessageNotificationTask,
-  sendConversationTeamMemberNotificationTask,
-} from "@/ee/features/conversations/lib/trigger/conversation-message-notification";
+import { sendConversationMessageNotificationTask } from "@/ee/features/conversations/lib/trigger/conversation-message-notification";
 
-export {
-  sendConversationMessageNotificationTask,
-  sendConversationTeamMemberNotificationTask,
-};
+export { sendConversationMessageNotificationTask };

@@ -1,11 +1,11 @@
 import { CopyObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { DocumentStorageType } from "@prisma/client";
-import { copy } from "@vercel/blob";
+import { put } from "@vercel/blob";
 import { match } from "ts-pattern";
 
 import { newId } from "@/lib/id-helper";
 
-import { getTeamS3ClientAndConfig } from "./aws-client";
+import { getS3Client } from "./aws-client";
 
 export const copyFileServer = async ({
   teamId,
@@ -40,11 +40,12 @@ const copyFileInVercelServer = async ({
   fileName: string;
   fileUrl: string;
 }) => {
+  const file = await fetch(fileUrl);
+  const contents = await file.arrayBuffer();
   const newFileName = fileName + "-copy";
 
-  const blob = await copy(fileUrl, newFileName, {
+  const blob = await put(newFileName, contents, {
     access: "public",
-    addRandomSuffix: true,
   });
 
   return {
@@ -72,17 +73,12 @@ const copyFileInS3Server = async ({
   const fromLocation = `${teamId}/${fromDocId}/`;
   const toLocation = `${teamId}/${toDocId}/`;
 
-  const { config } = await getTeamS3ClientAndConfig(teamId);
-
-  const response = await copyFolder(
-    {
-      fromBucket: config.bucket,
-      fromLocation: fromLocation,
-      toBucket: config.bucket,
-      toLocation: toLocation,
-    },
-    teamId,
-  );
+  const response = await copyFolder({
+    fromBucket: process.env.NEXT_PRIVATE_UPLOAD_BUCKET as string,
+    fromLocation: fromLocation,
+    toBucket: process.env.NEXT_PRIVATE_UPLOAD_BUCKET as string,
+    toLocation: toLocation,
+  });
 
   console.log("response", response);
 
@@ -93,21 +89,18 @@ const copyFileInS3Server = async ({
 };
 
 // copies all items in a folder on s3
-async function copyFolder(
-  {
-    fromBucket,
-    fromLocation,
-    toBucket = fromBucket,
-    toLocation,
-  }: {
-    fromBucket: string;
-    fromLocation: string;
-    toBucket: string;
-    toLocation: string;
-  },
-  teamId: string,
-) {
-  const { client } = await getTeamS3ClientAndConfig(teamId);
+async function copyFolder({
+  fromBucket,
+  fromLocation,
+  toBucket = fromBucket,
+  toLocation,
+}: {
+  fromBucket: string;
+  fromLocation: string;
+  toBucket: string;
+  toLocation: string;
+}) {
+  const client = getS3Client();
   let count = 0;
   const recursiveCopy = async function (token?: string) {
     const listCommand = new ListObjectsV2Command({

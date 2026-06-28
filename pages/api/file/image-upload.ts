@@ -53,7 +53,6 @@ export default async function handler(
         }
 
         return {
-          addRandomSuffix: true,
           allowedContentTypes:
             uploadConfig[type as keyof typeof uploadConfig].allowedContentTypes,
           maximumSizeInBytes:

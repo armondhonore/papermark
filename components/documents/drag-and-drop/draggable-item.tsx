@@ -2,9 +2,9 @@ import React, { useCallback, useState } from "react";
 
 import { useDraggable } from "@dnd-kit/core";
 
-import { cn } from "@/lib/utils";
-
 import { Checkbox } from "@/components/ui/checkbox";
+
+import { cn } from "@/lib/utils";
 
 interface DraggableItemProps {
   id: string;
@@ -61,7 +61,7 @@ export function DraggableItem({
   });
 
   return (
-    <div
+    <li
       ref={setNodeRef}
       style={style}
       {...attributes}
@@ -88,6 +88,6 @@ export function DraggableItem({
         />
       </div>
       {childWithProps}
-    </div>
+    </li>
   );
 }

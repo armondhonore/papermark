@@ -4,18 +4,11 @@ import useSWR from "swr";
 
 import { fetcher } from "@/lib/utils";
 
-export interface AgreementWithLinksCount extends Agreement {
-  _count: {
-    links: number;
-    responses: number;
-  };
-}
-
 export function useAgreements() {
   const teamInfo = useTeam();
   const teamId = teamInfo?.currentTeam?.id;
 
-  const { data: agreements, error } = useSWR<AgreementWithLinksCount[]>(
+  const { data: agreements, error } = useSWR<(Agreement & { _count: { links: number } })[]>(
     teamId && `/api/teams/${teamId}/agreements`,
     fetcher,
     {

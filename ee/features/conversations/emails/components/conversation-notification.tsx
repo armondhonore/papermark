@@ -62,7 +62,14 @@ export default function ConversationNotification({
             <Hr />
             <Section className="mt-8 text-gray-400">
               <Text className="text-xs">
-                © {new Date().getFullYear()} Papermark, Inc.
+                © {new Date().getFullYear()}{" "}
+                <a
+                  href="https://www.papermark.com"
+                  className="text-gray-400 no-underline visited:text-gray-400 hover:text-gray-400"
+                  target="_blank"
+                >
+                  papermark.com
+                </a>
               </Text>
               <Text className="text-xs">
                 You received this email from{" "}
@@ -76,7 +83,7 @@ export default function ConversationNotification({
                 this dataroom,{" "}
                 <a
                   href={unsubscribeUrl}
-                  className="text-gray-400 underline underline-offset-2 hover:text-gray-400"
+                  className="text-gray-400 underline underline-offset-2 visited:text-gray-400 hover:text-gray-400"
                 >
                   click here
                 </a>

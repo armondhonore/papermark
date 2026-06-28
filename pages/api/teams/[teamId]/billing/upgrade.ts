@@ -1,18 +1,13 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
-import { checkRateLimit, rateLimiters } from "@/ee/features/security";
 import { stripeInstance } from "@/ee/stripe";
-import { getCouponFromPlan } from "@/ee/stripe/functions/get-coupon-from-plan";
 import { getPlanFromPriceId, isOldAccount } from "@/ee/stripe/utils";
 import { waitUntil } from "@vercel/functions";
 import { getServerSession } from "next-auth/next";
 
 import { identifyUser, trackAnalytics } from "@/lib/analytics";
-import { enforceDataroomMemberScope } from "@/lib/api/rbac/guard";
-import { getDubDiscountForExternalUserId } from "@/lib/dub";
 import prisma from "@/lib/prisma";
 import { CustomUser } from "@/lib/types";
-import { getIpAddress } from "@/lib/utils/ip";
 
 import { authOptions } from "../../../auth/[...nextauth]";
 
@@ -26,20 +21,6 @@ export default async function handle(
   res: NextApiResponse,
 ) {
   if (req.method === "POST") {
-    // Apply rate limiting
-    const clientIP = getIpAddress(req.headers);
-    const rateLimitResult = await checkRateLimit(
-      rateLimiters.billing,
-      clientIP,
-    );
-
-    if (!rateLimitResult.success) {
-      return res.status(429).json({
-        error: "Too many billing requests. Please try again later.",
-        remaining: rateLimitResult.remaining,
-      });
-    }
-
     // POST /api/teams/:teamId/billing/upgrade
     const session = await getServerSession(req, res, authOptions);
     if (!session) {
@@ -47,18 +28,12 @@ export default async function handle(
       return;
     }
 
-    const { teamId, priceId, applyYearlyDiscount } = req.query as {
+    const { teamId, priceId } = req.query as {
       teamId: string;
       priceId: string;
-      applyYearlyDiscount?: string;
     };
 
     const { id: userId, email: userEmail } = session.user as CustomUser;
-
-    // Billing is a team-level action: dataroom-scoped members cannot upgrade.
-    if (await enforceDataroomMemberScope({ userId, teamId, res })) {
-      return;
-    }
 
     const team = await prisma.team.findUnique({
       where: {
@@ -79,109 +54,69 @@ export default async function handle(
 
     const oldAccount = isOldAccount(team.plan);
     const plan = getPlanFromPriceId(priceId, oldAccount);
-
-    if (!plan) {
-      res.status(400).json({ error: "Invalid price ID" });
-      return;
-    }
-
     const minimumQuantity = plan.minQuantity;
 
     let stripeSession;
-    let couponId: string | undefined;
-
-    // Apply 30% coupon for yearly plans if requested (same as retention flow)
-    // Since the upgrade modal is yearly-only, if applyYearlyDiscount is true, always apply
-    if (applyYearlyDiscount === "true") {
-      // Use the same logic as retention flow: getCouponFromPlan(team.plan, isAnnualPlan)
-      // team.plan format is "pro", "business", "pro+old", "business+old", etc.
-      const planString = oldAccount ? `${plan.slug}+old` : plan.slug;
-      couponId = getCouponFromPlan(planString, true);
-
-      // Verify coupon exists in Stripe (coupons might only exist in production, not test mode)
-      const stripe = stripeInstance(oldAccount);
-      try {
-        await stripe.coupons.retrieve(couponId);
-      } catch (error: any) {
-        // If coupon doesn't exist (common in test mode), continue without discount
-        if (error.code === "resource_missing") {
-          console.warn(
-            `[Upgrade] Coupon "${couponId}" not found in ${process.env.NEXT_PUBLIC_VERCEL_ENV || "test"} mode. ` +
-              `Continuing without discount. This is expected if the coupon only exists in production.`,
-          );
-          couponId = undefined;
-        } else {
-          // Re-throw other errors
-          throw error;
-        }
-      }
-    }
-
-    const isUnlimitedPlan = plan.slug === "datarooms-unlimited";
 
     const lineItem = {
       price: priceId,
-      quantity: isUnlimitedPlan ? 1 : oldAccount ? 1 : minimumQuantity,
-      ...(!oldAccount &&
-        !isUnlimitedPlan && {
-          adjustable_quantity: {
-            enabled: true,
-            minimum: minimumQuantity,
-            maximum: 99,
-          },
-        }),
-    };
-
-    const dubDiscount = await getDubDiscountForExternalUserId(userId);
-
-    const stripe = stripeInstance(oldAccount);
-    const baseSessionConfig = {
-      billing_address_collection: "required" as const,
-      success_url: `${process.env.NEXTAUTH_URL}/settings/billing?success=true`,
-      cancel_url: `${process.env.NEXTAUTH_URL}/settings/billing?cancel=true`,
-      line_items: [lineItem],
-      automatic_tax: {
-        enabled: true,
-      },
-      tax_id_collection: {
-        enabled: true,
-      },
-      mode: "subscription" as const,
-      client_reference_id: teamId,
-      ...(couponId && {
-        discounts: [{ coupon: couponId }],
+      quantity: oldAccount ? 1 : minimumQuantity,
+      ...(!oldAccount && {
+        adjustable_quantity: {
+          enabled: true,
+          minimum: minimumQuantity,
+          maximum: 99,
+        },
       }),
     };
 
+    const stripe = stripeInstance(oldAccount);
     if (team.stripeId) {
       // if the team already has a stripeId (i.e. is a customer) let's use as a customer
       stripeSession = await stripe.checkout.sessions.create({
-        ...baseSessionConfig,
         customer: team.stripeId,
         customer_update: { name: "auto" },
-        ...(!couponId && { allow_promotion_codes: true }),
+        billing_address_collection: "required",
+        success_url: `${process.env.NEXTAUTH_URL}/settings/billing?success=true`,
+        cancel_url: `${process.env.NEXTAUTH_URL}/settings/billing?cancel=true`,
+        line_items: [lineItem],
+        automatic_tax: {
+          enabled: true,
+        },
+        tax_id_collection: {
+          enabled: true,
+        },
+        mode: "subscription",
+        allow_promotion_codes: true,
+        client_reference_id: teamId,
       });
     } else {
       // else initialize a new customer
       stripeSession = await stripe.checkout.sessions.create({
-        ...baseSessionConfig,
         customer_email: userEmail ?? undefined,
-        ...(dubDiscount ?? (!couponId && { allow_promotion_codes: true })),
-        metadata: {
-          dubCustomerId: userId,
+        billing_address_collection: "required",
+        success_url: `${process.env.NEXTAUTH_URL}/settings/billing?success=true`,
+        cancel_url: `${process.env.NEXTAUTH_URL}/settings/billing?cancel=true`,
+        line_items: [lineItem],
+        automatic_tax: {
+          enabled: true,
         },
+        tax_id_collection: {
+          enabled: true,
+        },
+        mode: "subscription",
+        allow_promotion_codes: true,
+        client_reference_id: teamId,
       });
     }
 
+    waitUntil(identifyUser(userEmail ?? userId));
     waitUntil(
-      Promise.all([
-        identifyUser(userEmail ?? userId),
-        trackAnalytics({
-          event: "Stripe Checkout Clicked",
-          teamId,
-          priceId: priceId,
-        }),
-      ]),
+      trackAnalytics({
+        event: "Stripe Checkout Clicked",
+        teamId,
+        priceId: priceId,
+      }),
     );
 
     return res.status(200).json(stripeSession);

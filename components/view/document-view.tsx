@@ -4,12 +4,12 @@ import React, { useEffect, useRef, useState } from "react";
 
 import { Brand } from "@prisma/client";
 import Cookies from "js-cookie";
+import { usePlausible } from "next-plausible";
 import { ExtendedRecordMap } from "notion-types";
 import { toast } from "sonner";
 
 import { useAnalytics } from "@/lib/analytics";
-import { useDisablePrint } from "@/lib/hooks/use-disable-print";
-import { LinkWithDocument, NotionTheme } from "@/lib/types";
+import { LinkWithDocument, NotionTheme, WatermarkConfig } from "@/lib/types";
 
 import LoadingSpinner from "@/components/ui/loading-spinner";
 import AccessForm, {
@@ -32,15 +32,10 @@ export type DEFAULT_DOCUMENT_VIEW_TYPE = {
   file?: string | null;
   pages?:
     | {
-        file: string | null;
+        file: string;
         pageNumber: string;
         embeddedLinks: string[];
-        pageLinks: {
-          href: string;
-          coords: string;
-          isInternal?: boolean;
-          targetPage?: number;
-        }[];
+        pageLinks: { href: string; coords: string }[];
         metadata: { width: number; height: number; scaleFactor: number };
       }[]
     | null;
@@ -49,10 +44,6 @@ export type DEFAULT_DOCUMENT_VIEW_TYPE = {
   isPreview?: boolean;
   ipAddress?: string;
   verificationToken?: string;
-  isTeamMember?: boolean;
-  agentsEnabled?: boolean;
-  isEmbeddable?: boolean;
-  viewerId?: string;
 };
 
 export default function DocumentView({
@@ -70,10 +61,7 @@ export default function DocumentView({
   previewToken,
   disableEditEmail,
   useCustomAccessForm,
-  logoOnAccessForm,
   isEmbedded,
-  annotationsEnabled,
-  textSelectionEnabled,
 }: {
   link: LinkWithDocument;
   userEmail: string | null | undefined;
@@ -94,11 +82,7 @@ export default function DocumentView({
   disableEditEmail?: boolean;
   useCustomAccessForm?: boolean;
   isEmbedded?: boolean;
-  logoOnAccessForm?: boolean;
-  annotationsEnabled?: boolean;
-  textSelectionEnabled?: boolean;
 }) {
-  useDisablePrint();
   const {
     document,
     emailProtected,
@@ -106,6 +90,7 @@ export default function DocumentView({
     enableAgreement,
   } = link;
 
+  const plausible = usePlausible();
   const analytics = useAnalytics();
   const router = useRouter();
 
@@ -143,7 +128,6 @@ export default function DocumentView({
         userId: userId ?? null,
         documentVersionId: document.versions[0].id,
         hasPages: document.versions[0].hasPages,
-        startPage: router.query.p ? Number(router.query.p) : undefined,
         useAdvancedExcelViewer,
         previewToken,
         code: code ?? undefined,
@@ -156,14 +140,6 @@ export default function DocumentView({
       const fetchData = await response.json();
 
       if (fetchData.type === "email-verification") {
-        analytics.capture("Email Verification Requested", {
-          linkId: link.id,
-          documentId: document.id,
-          documentName: document.name,
-          linkType: "DOCUMENT_LINK",
-          viewerEmail: data.email ?? verifiedEmail ?? userEmail,
-          teamId: link.teamId,
-        });
         setVerificationRequested(true);
         setIsLoading(false);
       } else {
@@ -176,12 +152,8 @@ export default function DocumentView({
           isPreview,
           ipAddress,
           verificationToken,
-          agentsEnabled,
-          isEmbeddable,
-          isTeamMember,
-          viewerId,
         } = fetchData as DEFAULT_DOCUMENT_VIEW_TYPE;
-
+        plausible("documentViewed"); // track the event
         analytics.identify(
           userEmail ?? verifiedEmail ?? data.email ?? undefined,
         );
@@ -192,8 +164,6 @@ export default function DocumentView({
           viewerId: viewId,
           viewerEmail: data.email ?? verifiedEmail ?? userEmail,
           isEmbedded,
-          isTeamMember,
-          teamId: link.teamId,
         });
 
         // set the verification token to the cookie
@@ -215,10 +185,6 @@ export default function DocumentView({
           fileType,
           isPreview,
           ipAddress,
-          isTeamMember,
-          agentsEnabled,
-          isEmbeddable,
-          viewerId,
         });
         setSubmitted(true);
         setVerificationRequested(false);
@@ -251,12 +217,12 @@ export default function DocumentView({
   // If link is not submitted and does not have email / password protection, show the access form
   useEffect(() => {
     if (!didMount.current) {
-      if ((!submitted && !isProtected) || token || previewToken) {
+      if ((!submitted && !isProtected) || token) {
         handleSubmission();
       }
       didMount.current = true;
     }
-  }, [submitted, isProtected, token, previewToken]);
+  }, [submitted, isProtected, token]);
 
   // Components to render when email is submitted but verification is pending
   if (verificationRequested) {
@@ -269,7 +235,6 @@ export default function DocumentView({
         setCode={setCode}
         isInvalidCode={isInvalidCode}
         setIsInvalidCode={setIsInvalidCode}
-        brand={brand}
       />
     );
   }
@@ -285,20 +250,14 @@ export default function DocumentView({
         requireEmail={emailProtected}
         requirePassword={!!linkPassword}
         requireAgreement={enableAgreement!}
-        agreementId={link.agreement?.id}
         agreementName={link.agreement?.name}
         agreementContent={link.agreement?.content}
-        agreementContentType={link.agreement?.contentType}
-        signingProvider={link.agreement?.signingProvider}
         requireName={link.agreement?.requireName}
         isLoading={isLoading}
         brand={brand}
-        linkId={link.id}
         disableEditEmail={disableEditEmail}
         useCustomAccessForm={useCustomAccessForm}
         customFields={link.customFields}
-        logoOnAccessForm={logoOnAccessForm}
-        linkWelcomeMessage={link.welcomeMessage}
       />
     );
   }
@@ -310,7 +269,6 @@ export default function DocumentView({
       </div>
     );
   }
-
   return (
     <div
       className="bg-gray-950"
@@ -330,9 +288,6 @@ export default function DocumentView({
           showAccountCreationSlide={showAccountCreationSlide}
           useAdvancedExcelViewer={useAdvancedExcelViewer}
           viewerEmail={data.email ?? verifiedEmail ?? userEmail ?? undefined}
-          annotationsEnabled={annotationsEnabled}
-          textSelectionEnabled={textSelectionEnabled}
-          previewToken={previewToken}
         />
       ) : (
         <div className="flex h-screen items-center justify-center">

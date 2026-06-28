@@ -1,13 +1,13 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 
-import { MultiRegionS3Store } from "@/ee/features/storage/s3-store";
 import { CopyObjectCommand } from "@aws-sdk/client-s3";
+import slugify from "@sindresorhus/slugify";
+import { S3Store } from "@tus/s3-store";
 import { Server } from "@tus/server";
 import path from "node:path";
 
 import { verifyDataroomSessionInPagesRouter } from "@/lib/auth/dataroom-auth";
-import { getTeamS3ClientAndConfig } from "@/lib/files/aws-client";
-import { buildContentDisposition, safeSlugify } from "@/lib/utils";
+import { getS3Client } from "@/lib/files/aws-client";
 import { RedisLocker } from "@/lib/files/tus-redis-locker";
 import { newId } from "@/lib/id-helper";
 import prisma from "@/lib/prisma";
@@ -15,7 +15,6 @@ import { lockerRedisClient } from "@/lib/redis";
 import { log } from "@/lib/utils";
 
 export const config = {
-  maxDuration: 60,
   api: {
     bodyParser: false,
   },
@@ -25,13 +24,26 @@ const locker = new RedisLocker({
   redisClient: lockerRedisClient,
 });
 
+const client = getS3Client();
+
 const tusServer = new Server({
   // `path` needs to match the route declared by the next file router
   path: "/api/file/tus-viewer",
   maxSize: 1024 * 1024 * 1024 * 2, // 2 GiB
   respectForwardedHeaders: true,
   locker,
-  datastore: new MultiRegionS3Store(),
+  datastore: new S3Store({
+    partSize: 8 * 1024 * 1024, // each uploaded part will have ~8MiB
+    s3ClientConfig: {
+      bucket: process.env.NEXT_PRIVATE_UPLOAD_BUCKET as string,
+      region: process.env.NEXT_PRIVATE_UPLOAD_REGION as string,
+      credentials: {
+        accessKeyId: process.env.NEXT_PRIVATE_UPLOAD_ACCESS_KEY_ID as string,
+        secretAccessKey: process.env
+          .NEXT_PRIVATE_UPLOAD_SECRET_ACCESS_KEY as string,
+      },
+    },
+  }),
   async namingFunction(req, metadata) {
     // Extract viewer data from metadata
     const { teamId, fileName, viewerId, linkId, dataroomId } = metadata as {
@@ -78,7 +90,7 @@ const tusServer = new Server({
 
     const docId = newId("doc");
     const { name, ext } = path.parse(fileName);
-    const newName = `${teamIdToUse}/${docId}/${safeSlugify(name)}${ext}`;
+    const newName = `${teamIdToUse}/${docId}/${slugify(name)}${ext}`;
     return newName;
   },
   generateUrl(req, { proto, host, path, id }) {
@@ -147,28 +159,15 @@ const tusServer = new Server({
       const metadata = upload.metadata || {};
       const contentType = metadata.contentType || "application/octet-stream";
       const { name, ext } = path.parse(metadata.fileName!);
-      const originalFileName = `${name}${ext}`;
-      const contentDisposition = buildContentDisposition(
-        originalFileName,
-        `${safeSlugify(name)}${ext}`,
-      );
+      const contentDisposition = `attachment; filename="${slugify(name)}${ext}"`;
 
       // The Key (object path) where the file was uploaded
       const objectKey = upload.id;
 
-      // Extract teamId from the object key (format: teamId/docId/filename)
-      const teamId = objectKey.split("/")[0];
-      if (!teamId) {
-        throw { status_code: 500, body: "Invalid object key format" };
-      }
-
-      // Get team-specific S3 client and config
-      const { client, config } = await getTeamS3ClientAndConfig(teamId);
-
       // Copy the object onto itself, replacing the metadata
       const params = {
-        Bucket: config.bucket,
-        CopySource: `${config.bucket}/${objectKey}`,
+        Bucket: process.env.NEXT_PRIVATE_UPLOAD_BUCKET,
+        CopySource: `${process.env.NEXT_PRIVATE_UPLOAD_BUCKET}/${objectKey}`,
         Key: objectKey,
         ContentType: contentType,
         ContentDisposition: contentDisposition,

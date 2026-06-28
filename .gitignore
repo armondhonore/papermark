@@ -48,12 +48,7 @@ next-env.d.ts
 
 # Internal scripts
 pages/api/scripts
-scripts/*
-!scripts/generate-openapi.ts
-!scripts/mcp-smoke.mjs
-!scripts/check-tool-contracts.sh
-!scripts/extend-trial.ts
-!.github/scripts/
+scripts/
 
 # marketing emails
 components/emails/marketing
@@ -65,11 +60,5 @@ lib/emails/marketing
 # trigger.dev
 .trigger
 
-# changelog and docs
+# changelog
 changelog
-.docs
-
-# Local sync workflow dry-run output
-_public/
-
-.opencode

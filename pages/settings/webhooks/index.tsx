@@ -1,18 +1,21 @@
 import Link from "next/link";
+import { useRouter } from "next/router";
+
+import { useEffect } from "react";
 
 import { useTeam } from "@/context/team-context";
-import { PlanEnum } from "@/ee/stripe/constants";
-import { CircleHelpIcon, CrownIcon, WebhookIcon } from "lucide-react";
+import { format } from "date-fns";
+import { CircleHelpIcon, CopyIcon, WebhookIcon } from "lucide-react";
+import { toast } from "sonner";
 import useSWR from "swr";
 
-import { usePlan } from "@/lib/swr/use-billing";
-import { fetcher } from "@/lib/utils";
-
-import { UpgradePlanModal } from "@/components/billing/upgrade-plan-modal";
 import AppLayout from "@/components/layouts/app";
 import { SettingsHeader } from "@/components/settings/settings-header";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { BadgeTooltip } from "@/components/ui/tooltip";
+
+import { fetcher } from "@/lib/utils";
 
 interface Webhook {
   id: string;
@@ -22,9 +25,23 @@ interface Webhook {
 }
 
 export default function WebhookSettings() {
+  const router = useRouter();
   const teamInfo = useTeam();
-  const { isFree, isPro, isTrial } = usePlan();
   const teamId = teamInfo?.currentTeam?.id;
+
+  // Feature flag check
+  const { data: features } = useSWR<{ webhooks: boolean }>(
+    teamId ? `/api/feature-flags?teamId=${teamId}` : null,
+    fetcher,
+  );
+
+  // Redirect if feature is not enabled
+  useEffect(() => {
+    if (features && !features.webhooks) {
+      router.push("/settings/general");
+      toast.error("This feature is not available for your team");
+    }
+  }, [features, router]);
 
   const { data: webhooks } = useSWR<Webhook[]>(
     teamId ? `/api/teams/${teamId}/webhooks` : null,
@@ -38,19 +55,8 @@ export default function WebhookSettings() {
         <div>
           <div className="mb-4 flex items-center justify-between md:mb-8 lg:mb-12">
             <div className="space-y-1">
-              <h3 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-foreground">
-                Webhooks{" "}
-                {(isFree || isPro) && !isTrial ? (
-                  <UpgradePlanModal
-                    clickedPlan={PlanEnum.Business}
-                    trigger="create_webhook"
-                    highlightItem={["webhooks"]}
-                  >
-                    <span className="cursor-pointer">
-                      <CrownIcon className="h-4 w-4 text-muted-foreground hover:text-foreground" />
-                    </span>
-                  </UpgradePlanModal>
-                ) : null}
+              <h3 className="text-2xl font-semibold tracking-tight text-foreground">
+                Webhooks
               </h3>
               <p className="flex flex-row items-center gap-2 text-sm text-muted-foreground">
                 Send data to external services when events happen in Papermark
@@ -59,9 +65,9 @@ export default function WebhookSettings() {
                 </BadgeTooltip>
               </p>
             </div>
-            <Link href="/settings/webhooks/new">
-              <Button>Create Webhook</Button>
-            </Link>
+            <Button onClick={() => router.push("/settings/webhooks/new")}>
+              Create Webhook
+            </Button>
           </div>
 
           {/* Webhooks List */}

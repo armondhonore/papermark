@@ -2,7 +2,6 @@ import { useState } from "react";
 
 import { PlanEnum } from "@/ee/stripe/constants";
 import {
-  CrownIcon,
   FileJson,
   FileSlidersIcon,
   FileSpreadsheet,
@@ -26,7 +25,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { ResponsiveButton } from "@/components/ui/responsive-button";
 import {
   Select,
   SelectContent,
@@ -61,7 +59,7 @@ export default function GenerateIndexDialog({
 
   const handleGenerateIndex = async () => {
     if (!hasDataroomsPlan) {
-      toast.error("Upgrade to a Data Rooms Plus plan to generate index files.");
+      toast.error("Upgrade to a Data Rooms plan to generate index files.");
       return;
     }
 
@@ -137,13 +135,10 @@ export default function GenerateIndexDialog({
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <ResponsiveButton
-          icon={<FileSlidersIcon className="h-4 w-4" />}
-          text="Generate Index"
-          variant="outline"
-          size="sm"
-          disabled={disabled}
-        />
+        <Button variant="outline" size="sm" disabled={disabled}>
+          <FileSlidersIcon />
+          Generate Index File
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -151,7 +146,7 @@ export default function GenerateIndexDialog({
           <DialogDescription>
             {hasDataroomsPlan
               ? "Select a link and format to generate the index file."
-              : "Upgrade to a Data Rooms Plus plan to generate index files."}
+              : "Upgrade to a Data Rooms plan to generate index files."}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
@@ -228,12 +223,8 @@ export default function GenerateIndexDialog({
             <UpgradePlanModal
               clickedPlan={PlanEnum.DataRooms}
               trigger="datarooms_generate_index_button"
-              highlightItem={["indexing"]}
             >
-              <Button className="gap-1.5">
-                <CrownIcon className="h-4 w-4" />
-                Upgrade to generate
-              </Button>
+              <Button>Upgrade to generate</Button>
             </UpgradePlanModal>
           )}
         </DialogFooter>

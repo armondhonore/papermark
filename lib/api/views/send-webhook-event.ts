@@ -1,5 +1,4 @@
-import { isTeamPausedById } from "@/ee/features/billing/cancellation/lib/is-team-paused";
-
+import { getFeatureFlags } from "@/lib/featureFlags";
 import prisma from "@/lib/prisma";
 import { log } from "@/lib/utils";
 import { sendWebhooks } from "@/lib/webhook/send-webhooks";
@@ -23,21 +22,9 @@ export async function sendLinkViewWebhook({
       throw new Error("Missing required parameters");
     }
 
-    // check if team is on paid plan
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-      select: { plan: true },
-    });
-
-    if (team?.plan === "free" || team?.plan === "pro") {
-      // team is not on a webhook-eligible plan, so we don't send webhooks
-      return;
-    }
-
-    // check if team is paused
-    const teamIsPaused = await isTeamPausedById(teamId);
-    if (teamIsPaused) {
-      // team is paused, so we don't send webhooks
+    const features = await getFeatureFlags({ teamId });
+    if (!features.webhooks) {
+      // webhooks are not enabled for this team
       return;
     }
 
@@ -92,7 +79,6 @@ export async function sendLinkViewWebhook({
       enabledFeedback: link.enableFeedback ?? false,
       enabledQuestion: link.enableQuestion ?? false,
       enabledScreenshotProtection: link.enableScreenshotProtection ?? false,
-      enabledConfidentialView: link.enableConfidentialView ?? false,
       enabledAgreement: link.enableAgreement ?? false,
       enabledWatermark: link.enableWatermark ?? false,
       metaTitle: link.metaTitle,
@@ -102,7 +88,6 @@ export async function sendLinkViewWebhook({
       documentId: link.documentId,
       dataroomId: link.dataroomId,
       groupId: link.groupId,
-      permissionGroupId: link.permissionGroupId,
       linkType: link.linkType,
       teamId: teamId,
       createdAt: link.createdAt.toISOString(),

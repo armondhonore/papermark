@@ -1,12 +1,13 @@
 import {
   Agreement,
   CustomField,
+  Dataroom,
   DataroomDocument,
   DataroomFolder,
   Document,
   DocumentVersion,
+  Feedback,
   Link,
-  PermissionGroupAccessControls,
   User as PrismaUser,
   View,
   ViewerGroupAccessControls,
@@ -49,11 +50,6 @@ export interface DocumentWithVersion extends Document {
       id: string;
       name: string;
     };
-    folder: {
-      id: string;
-      name: string;
-      path: string;
-    };
   }[];
   hasPageLinks: boolean;
 }
@@ -66,8 +62,7 @@ export interface LinkWithViews extends Link {
   feedback: { id: true; data: { question: string; type: string } } | null;
   customFields: CustomField[];
   tags: TagProps[];
-  uploadFolders?: { id: string; name: string; path: string | null }[];
-  visitorGroups?: { visitorGroupId: string }[];
+  uploadFolderName: string | undefined;
 }
 
 export interface LinkWithDocument extends Link {
@@ -131,9 +126,7 @@ export interface LinkWithDataroom extends Link {
     documents: {
       id: string;
       folderId: string | null;
-      updatedAt: Date;
       orderIndex: number | null;
-      hierarchicalIndex: string | null;
       document: {
         id: string;
         name: string;
@@ -144,7 +137,6 @@ export interface LinkWithDataroom extends Link {
           hasPages: boolean;
           file: string;
           isVertical: boolean;
-          updatedAt: Date;
         }[];
       };
     }[];
@@ -155,12 +147,8 @@ export interface LinkWithDataroom extends Link {
   group?: {
     accessControls: ViewerGroupAccessControls[];
   };
-  accessControls?:
-    | ViewerGroupAccessControls[]
-    | PermissionGroupAccessControls[];
   agreement: Agreement | null;
   customFields: CustomField[];
-  enableIndexFile: boolean;
 }
 
 export interface Geo {
@@ -308,35 +296,25 @@ export interface Team {
   logo?: React.ElementType;
   plan?: string;
   createdAt?: Date;
-  enableExcelAdvancedMode?: boolean;
-  replicateDataroomFolders?: boolean;
 }
-
-export type TeamRole = "ADMIN" | "MANAGER" | "MEMBER" | "DATAROOM_MEMBER";
 
 export interface TeamDetail {
   id: string;
   name: string;
+  documents: {
+    owner: {
+      id: string;
+      name: string;
+    };
+  }[];
   users: {
-    role: TeamRole;
-    status: "ACTIVE" | "BLOCKED_TRIAL_EXPIRED";
+    role: "ADMIN" | "MANAGER" | "MEMBER";
     teamId: string;
-    userId: string;
     user: {
       email: string;
       name: string;
     };
-  }[];
-  documents: {
-    owner: {
-      name: string;
-      id: string;
-    };
-  }[];
-  // Per-member dataroom assignments (scoped DATAROOM_MEMBER role).
-  userDatarooms?: {
     userId: string;
-    dataroomId: string;
   }[];
 }
 
@@ -378,8 +356,6 @@ export type BasePlan =
   | "business"
   | "datarooms"
   | "datarooms-plus"
-  | "datarooms-premium"
-  | "datarooms-unlimited"
   | "enterprise";
 
 export const tagColors = [

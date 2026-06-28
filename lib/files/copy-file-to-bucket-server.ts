@@ -2,21 +2,17 @@ import { CopyObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { DocumentStorageType } from "@prisma/client";
 import { match } from "ts-pattern";
 
-import { getTeamS3ClientAndConfig } from "./aws-client";
+import { getS3Client } from "./aws-client";
 
 export const copyFileToBucketServer = async ({
   filePath,
   storageType,
-  teamId,
 }: {
   filePath: string;
   storageType: DocumentStorageType;
-  teamId: string;
 }) => {
   const { type, data } = await match(storageType)
-    .with("S3_PATH", async () =>
-      copyFileToBucketInS3Server({ filePath, teamId }),
-    )
+    .with("S3_PATH", async () => copyFileToBucketInS3Server({ filePath }))
     .otherwise(() => {
       return {
         type: null,
@@ -29,17 +25,17 @@ export const copyFileToBucketServer = async ({
 
 const copyFileToBucketInS3Server = async ({
   filePath,
-  teamId,
 }: {
   filePath: string;
-  teamId: string;
 }) => {
-  const { client, config } = await getTeamS3ClientAndConfig(teamId);
+  const client = getS3Client();
+  const fromBucket = process.env.NEXT_PRIVATE_UPLOAD_BUCKET as string;
+  const toBucket = process.env.NEXT_PRIVATE_ADVANCED_UPLOAD_BUCKET as string;
 
   try {
     const copyCommand = new CopyObjectCommand({
-      CopySource: `${config.bucket}/${filePath}`,
-      Bucket: config.advancedBucket,
+      CopySource: `${fromBucket}/${filePath}`,
+      Bucket: toBucket,
       Key: filePath,
     });
 

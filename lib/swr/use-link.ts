@@ -1,6 +1,5 @@
 import { useRouter } from "next/router";
 
-import { useTeam } from "@/context/team-context";
 import { View } from "@prisma/client";
 import useSWR from "swr";
 
@@ -66,18 +65,9 @@ interface ViewWithDuration extends View {
   completionRate: number;
 }
 
-interface LinkVisitsResponse {
-  views: ViewWithDuration[];
-  hiddenFromPause: number;
-}
-
 export function useLinkVisits(linkId: string) {
-  const teamInfo = useTeam();
-  const teamId = teamInfo?.currentTeam?.id;
-  const { data, error } = useSWR<LinkVisitsResponse>(
-    linkId &&
-      teamId &&
-      `/api/teams/${teamId}/links/${encodeURIComponent(linkId)}/visits`,
+  const { data: views, error } = useSWR<ViewWithDuration[]>(
+    linkId && `/api/links/${encodeURIComponent(linkId)}/visits`,
     fetcher,
     {
       dedupingInterval: 10000,
@@ -85,9 +75,8 @@ export function useLinkVisits(linkId: string) {
   );
 
   return {
-    views: data?.views,
-    hiddenFromPause: data?.hiddenFromPause ?? 0,
-    loading: !error && !data,
+    views,
+    loading: !error && !views,
     error,
   };
 }

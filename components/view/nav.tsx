@@ -3,14 +3,10 @@ import { useRouter } from "next/router";
 
 import React, { useEffect, useState } from "react";
 
-import { useViewerChatSafe } from "@/ee/features/ai/components/viewer-chat-provider";
 import { Brand, DataroomBrand } from "@prisma/client";
-import { useTranslation } from "react-i18next";
 import {
   ArrowUpRight,
-  BadgeInfoIcon,
   Download,
-  Maximize,
   MessageCircle,
   Slash,
   ZoomInIcon,
@@ -18,8 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { createAdaptiveSurfacePalette } from "@/lib/utils/create-adaptive-surface-palette";
-import { downloadFromLinkEndpoint } from "@/lib/utils/download-document";
+import { determineTextColor } from "@/lib/utils/determine-text-color";
 
 import {
   DropdownMenu,
@@ -47,7 +42,6 @@ import {
   BreadcrumbSeparator,
 } from "../ui/breadcrumb";
 import { Button } from "../ui/button";
-import { AnnotationToggle } from "./annotations/annotation-toggle";
 import { ConversationSidebar } from "./conversations/sidebar";
 import ReportForm from "./report-form";
 
@@ -61,13 +55,10 @@ export type TNavData = {
   viewerId?: string;
   isMobile?: boolean;
   isPreview?: boolean;
+
   dataroomId?: string;
   conversationsEnabled?: boolean;
-  isTeamMember?: boolean;
-  annotationsEnabled?: boolean;
-  hasAnnotations?: boolean;
-  annotationsFeatureEnabled?: boolean;
-  onToggleAnnotations?: (enabled: boolean) => void;
+  assistantEnabled?: boolean;
 };
 
 export default function Nav({
@@ -79,7 +70,6 @@ export default function Nav({
   hasWatermark,
   handleZoomIn,
   handleZoomOut,
-  handleFullscreen,
 }: {
   navData: TNavData;
   type?: "pdf" | "notion" | "sheet";
@@ -89,15 +79,10 @@ export default function Nav({
   hasWatermark?: boolean;
   handleZoomIn?: () => void;
   handleZoomOut?: () => void;
-  handleFullscreen?: () => void;
 }) {
   const router = useRouter();
   const asPath = router.asPath;
   const { previewToken, preview } = router.query;
-
-  // Get chat context to adjust navbar when chat is open
-  const chatContext = useViewerChatSafe();
-  const isChatOpen = chatContext?.isOpen && chatContext?.isEnabled;
 
   const {
     linkId,
@@ -111,16 +96,10 @@ export default function Nav({
     documentId,
     dataroomId,
     conversationsEnabled,
-    isTeamMember,
-    annotationsEnabled,
-    hasAnnotations,
-    annotationsFeatureEnabled,
-    onToggleAnnotations,
+    assistantEnabled,
   } = navData;
 
-  const { t } = useTranslation("viewer");
   const [showConversations, setShowConversations] = useState(false);
-  const navColorPalette = createAdaptiveSurfacePalette(brand?.brandColor);
 
   // Extract the dataroom path from the URL
   // This regex captures everything before "/d/" in the path
@@ -129,33 +108,55 @@ export default function Nav({
 
   const downloadFile = async () => {
     if (isPreview) {
-      toast.error(t("toasts.cannotDownloadPreview", "You cannot download documents in preview mode."));
+      toast.error("You cannot download documents in preview mode.");
       return;
     }
     if (!allowDownload || type === "notion") return;
+    try {
+      const response = await fetch(`/api/links/download`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ linkId, viewId }),
+      });
 
-    // The server only produces a buffered binary response (which is when this
-    // fallback is consulted) for watermarked PDFs today, but other viewers
-    // ("sheet", future flows) share this Nav. Derive a safe fallback from the
-    // viewer `type` rather than hardcoding ".pdf" so non-PDF flows don't get
-    // a misleading extension if the contract ever broadens. We don't have the
-    // document name here, so we use a generic "document"-stem fallback.
-    const fallbackFileName =
-      !type || type === "pdf" ? "document.pdf" : "document";
+      if (!response.ok) {
+        toast.error("Error downloading file");
+        return;
+      }
 
-    const downloadPromise = downloadFromLinkEndpoint({
-      endpoint: "/api/links/download",
-      body: { linkId, viewId },
-      fallbackFileName,
-    });
+      if (hasWatermark) {
+        const pdfBlob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(pdfBlob);
 
-    toast.promise(downloadPromise, {
-      loading: hasWatermark
-        ? t("toasts.preparingDownloadWatermark", "Preparing download with watermark...")
-        : t("toasts.preparingDownload", "Preparing download..."),
-      success: t("toasts.downloadSuccess", "File downloaded successfully"),
-      error: (err) => err.message || t("toasts.downloadFailed", "Failed to download file"),
-    });
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.rel = "noopener noreferrer";
+        link.download = "watermarked_document.pdf";
+        document.body.appendChild(link);
+        link.click();
+
+        setTimeout(() => {
+          window.URL.revokeObjectURL(blobUrl);
+          document.body.removeChild(link);
+        }, 100);
+      } else {
+        const { downloadUrl } = await response.json();
+
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+
+        setTimeout(() => {
+          document.body.removeChild(link);
+        }, 100);
+      }
+    } catch (error) {
+      console.error("Error downloading file:", error);
+    }
   };
 
   useEffect(() => {
@@ -189,9 +190,6 @@ export default function Nav({
       className="bg-black"
       style={{
         backgroundColor: brand && brand.brandColor ? brand.brandColor : "black",
-        // Extend navbar to full width when chat panel is open (counteract parent padding)
-        marginRight: isChatOpen ? "-400px" : undefined,
-        // paddingRight: isChatOpen ? "400px" : undefined,
       }}
     >
       <div className="mx-auto px-2 sm:px-6 lg:px-8">
@@ -209,7 +207,7 @@ export default function Nav({
                 />
               ) : (
                 <Link
-                  href={`https://www.papermark.com?utm_campaign=navbar&utm_medium=navbar&utm_source=papermark-${linkId}`}
+                  href={`https://www.papermark.com/home?utm_campaign=navbar&utm_medium=navbar&utm_source=papermark-${linkId}`}
                   target="_blank"
                   className="text-2xl font-bold tracking-tighter text-white"
                 >
@@ -218,17 +216,17 @@ export default function Nav({
               )}
             </div>
             {isDataroom ? (
-              <Breadcrumb className="ml-6">
+              <Breadcrumb>
                 <BreadcrumbList>
                   <BreadcrumbItem>
                     <BreadcrumbLink
                       className="cursor-pointer underline underline-offset-4 hover:font-medium"
                       href={`${dataroomPath}${isPreview ? "?previewToken=" + previewToken + "&preview=" + preview : ""}`}
                       style={{
-                        color: navColorPalette.textColor,
+                        color: determineTextColor(brand?.brandColor),
                       }}
                     >
-                      {t("nav.home", "Home")}
+                      Home
                     </BreadcrumbLink>
                   </BreadcrumbItem>
                   {type === "notion" ? (
@@ -250,53 +248,34 @@ export default function Nav({
             ) : null}
           </div>
           <div className="absolute inset-y-0 right-0 flex items-center space-x-2 pr-2 sm:static sm:inset-auto sm:ml-6 sm:space-x-4 sm:pr-0">
-            {isTeamMember && (
-              <TooltipProvider delayDuration={100}>
+            {/* Conversation toggle button for dataroom documents */}
+            {isDataroom && conversationsEnabled && (
+              <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
+                      onClick={() => setShowConversations(!showConversations)}
                       className="size-8 bg-gray-900 text-white hover:bg-gray-900/80 sm:size-10"
                       size="icon"
                     >
-                      <BadgeInfoIcon className="h-5 w-5" />
+                      <MessageCircle className="h-5 w-5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="max-w-xs text-wrap text-center">
-                      {t("nav.teamMemberTooltip", "Skipped verification because you are a team member; no analytics will be collected")}
-                    </p>
+                  <TooltipContent side="bottom">
+                    <p>Toggle conversations</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-            )}
-            {/* Conversation toggle button for dataroom documents */}
-            {isDataroom && conversationsEnabled && (
-              <Button
-                onClick={() => setShowConversations(!showConversations)}
-                className="bg-gray-900 text-white hover:bg-gray-900/80"
-              >
-                {t("nav.viewQA", "View Q&A")}
-              </Button>
-            )}
-            {/* Annotations toggle button */}
-            {onToggleAnnotations && annotationsFeatureEnabled && (
-              <AnnotationToggle
-                enabled={annotationsEnabled || false}
-                onToggle={onToggleAnnotations}
-                hasAnnotations={hasAnnotations}
-              />
             )}
             {embeddedLinks && embeddedLinks.length > 0 ? (
               <DropdownMenu>
                 <DropdownMenuTrigger>
                   <Button className="bg-gray-900 text-sm font-medium text-white hover:bg-gray-900/80">
-                    {t("nav.linksOnPage", "Links on Page")}
+                    Links on Page
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="space-y-2" align="end">
-                  <DropdownMenuLabel>
-                    {t("nav.linksOnCurrentPage", "Links on current page")}
-                  </DropdownMenuLabel>
+                  <DropdownMenuLabel>Links on current page</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {embeddedLinks.map((link, index) => (
                     <Link
@@ -318,13 +297,27 @@ export default function Nav({
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
-
+            {assistantEnabled ? (
+              <Link href={`/view/${linkId}/chat`}>
+                <Button
+                  className="m-1 bg-gray-900 text-white hover:bg-gray-900/80"
+                  variant={"special"}
+                  size={"icon"}
+                  style={{
+                    backgroundSize: "200% auto",
+                  }}
+                  title="Open AI Document Assistant"
+                >
+                  <PapermarkSparkle className="h-5 w-5" />
+                </Button>
+              </Link>
+            ) : null}
             {allowDownload ? (
               <Button
                 onClick={downloadFile}
                 className="size-8 bg-gray-900 text-white hover:bg-gray-900/80 sm:size-10"
                 size="icon"
-                title={t("nav.downloadDocument", "Download document")}
+                title="Download document"
               >
                 <Download className="size-4 sm:size-5" />
               </Button>
@@ -344,7 +337,7 @@ export default function Nav({
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <span className="mr-2 text-xs">{t("nav.zoomIn", "Zoom in")}</span>
+                      <span className="mr-2 text-xs">Zoom in</span>
                       <span className="ml-auto rounded-sm border bg-muted p-0.5 text-xs tracking-widest text-muted-foreground">
                         ⌘+
                       </span>
@@ -364,39 +357,17 @@ export default function Nav({
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <span className="mr-2 text-xs">{t("nav.zoomOut", "Zoom out")}</span>
+                      <span className="mr-2 text-xs">Zoom out</span>
                       <span className="ml-auto rounded-sm border bg-muted p-0.5 text-xs tracking-widest text-muted-foreground">
                         ⌘-
                       </span>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
-
-                {handleFullscreen && (
-                  <TooltipProvider delayDuration={50}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          onClick={handleFullscreen}
-                          className="bg-gray-900 text-white hover:bg-gray-900/80"
-                          size="icon"
-                        >
-                          <Maximize className="h-5 w-5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <span className="mr-2 text-xs">{t("nav.fullscreen", "Fullscreen")}</span>
-                        <span className="ml-auto rounded-sm border bg-muted p-0.5 text-xs tracking-widest text-muted-foreground">
-                          F
-                        </span>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                )}
               </div>
             )}
 
-            {pageNumber && numPages && numPages > 1 ? (
+            {pageNumber && numPages ? (
               <div className="flex h-8 items-center space-x-1 rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white sm:h-10 sm:px-4 sm:py-2 sm:text-sm">
                 <span style={{ fontVariantNumeric: "tabular-nums" }}>
                   {pageNumber}
@@ -424,7 +395,6 @@ export default function Nav({
         <ConversationSidebar
           dataroomId={dataroomId}
           documentId={documentId}
-          pageNumber={pageNumber}
           viewId={viewId || ""}
           viewerId={viewerId}
           linkId={linkId!}

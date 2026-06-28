@@ -4,30 +4,20 @@ import * as React from "react";
 
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 
-import { cn } from "@/lib/utils";
-
 import X from "@/components/shared/icons/x";
+
+import { cn } from "@/lib/utils";
 
 const Dialog = DialogPrimitive.Root;
 
-const DialogTrigger = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Trigger>
->((props, ref) => <DialogPrimitive.Trigger ref={ref} {...props} />);
-DialogTrigger.displayName = DialogPrimitive.Trigger.displayName;
+const DialogTrigger = DialogPrimitive.Trigger;
 
 const DialogPortal = ({
   children,
-  isPreviewDialog,
   ...props
-}: DialogPrimitive.DialogPortalProps & { isPreviewDialog?: boolean }) => (
+}: DialogPrimitive.DialogPortalProps) => (
   <DialogPrimitive.Portal {...props}>
-    <div
-      className={cn(
-        "fixed inset-0 z-50 flex items-end justify-center sm:items-center",
-        isPreviewDialog && "items-center",
-      )}
-    >
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
       {children}
     </div>
   </DialogPrimitive.Portal>
@@ -53,51 +43,31 @@ const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     isDocumentDialog?: boolean;
-    isPreviewDialog?: boolean;
-    mobileFullScreen?: boolean;
   }
->(
-  (
-    {
-      className,
-      children,
-      isDocumentDialog,
-      isPreviewDialog,
-      mobileFullScreen,
-      ...props
-    },
-    ref,
-  ) => (
-    <DialogPortal isPreviewDialog={isPreviewDialog}>
-      <DialogOverlay />
-      <DialogPrimitive.Content
-        ref={ref}
+>(({ className, children, isDocumentDialog, ...props }, ref) => (
+  <DialogPortal>
+    <DialogOverlay />
+    <DialogPrimitive.Content
+      ref={ref}
+      className={cn(
+        "fixed z-50 grid w-full gap-4 rounded-t-lg border border-gray-800 bg-background p-6 shadow-lg animate-in data-[state=open]:fade-in-90 data-[state=open]:slide-in-from-bottom-10 sm:max-w-xl sm:rounded-lg sm:zoom-in-90 data-[state=open]:sm:slide-in-from-bottom-0 md:w-1/2",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <DialogPrimitive.Close
         className={cn(
-          "fixed z-50 grid w-full gap-4 rounded-t-lg border border-gray-800 bg-background p-6 shadow-lg animate-in data-[state=open]:fade-in-90 data-[state=open]:slide-in-from-bottom-10 sm:max-w-xl sm:rounded-lg sm:zoom-in-90 data-[state=open]:sm:slide-in-from-bottom-0 md:w-1/2",
-          mobileFullScreen &&
-            "max-sm:!inset-0 max-sm:!h-[100dvh] max-sm:!w-[100vw] max-sm:!max-w-none max-sm:!overflow-y-auto max-sm:!rounded-none max-sm:!border-none max-sm:!p-0",
-          className,
+          "absolute rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground",
+          isDocumentDialog ? "right-8 top-20" : "right-4 top-4",
         )}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          document.body.style.pointerEvents = "";
-        }}
-        {...props}
       >
-        {children}
-        <DialogPrimitive.Close
-          className={cn(
-            "absolute z-10 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground",
-            isDocumentDialog ? "right-8 top-20" : "right-4 top-4",
-          )}
-        >
-          <X className="h-5 w-5 sm:h-4 sm:w-4" />
-          <span className="sr-only">Close</span>
-        </DialogPrimitive.Close>
-      </DialogPrimitive.Content>
-    </DialogPortal>
-  ),
-);
+        <X className="h-4 w-4" />
+        <span className="sr-only">Close</span>
+      </DialogPrimitive.Close>
+    </DialogPrimitive.Content>
+  </DialogPortal>
+));
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogHeader = ({

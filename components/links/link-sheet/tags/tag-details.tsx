@@ -1,30 +1,27 @@
 import { useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { useRouter } from "next/router";
 
 import { PropsWithChildren, useMemo, useRef } from "react";
-import { useQueryState } from "nuqs";
 
 import { LinkWithViews, TagColorProps, TagProps } from "@/lib/types";
-
-
 
 import { BadgeTooltip } from "@/components/ui/tooltip";
 
 import TagBadge from "./tag-badge";
 
-
 function useOrganizedTags(tags: LinkWithViews["tags"]) {
   const searchParams = useSearchParams();
 
   const [primaryTag, additionalTags] = useMemo(() => {
-    const filteredTagNames =
-      searchParams?.get("tags")?.split(",")?.filter(Boolean) ?? [];
+    const filteredTagIds =
+      searchParams?.get("tagIds")?.split(",")?.filter(Boolean) ?? [];
 
     const sortedTags =
-      filteredTagNames.length > 0
+      filteredTagIds.length > 0
         ? [...tags].sort(
             (a, b) =>
-              filteredTagNames.indexOf(b.name) -
-              filteredTagNames.indexOf(a.name),
+              filteredTagIds.indexOf(b.id) - filteredTagIds.indexOf(a.id),
           )
         : tags;
 
@@ -34,13 +31,7 @@ function useOrganizedTags(tags: LinkWithViews["tags"]) {
   return { primaryTag, additionalTags };
 }
 
-export function TagColumn({
-  link,
-  onClose,
-}: {
-  link: LinkWithViews;
-  onClose?: () => void;
-}) {
+export function TagColumn({ link }: { link: LinkWithViews }) {
   const { tags } = link;
 
   const ref = useRef<HTMLDivElement>(null);
@@ -50,12 +41,8 @@ export function TagColumn({
   return (
     <div ref={ref} className="flex items-center gap-2 sm:gap-5">
       {primaryTag ? (
-        <TagsTooltip additionalTags={additionalTags} onClose={onClose}>
-          <TagButton
-            tag={primaryTag}
-            plus={additionalTags.length}
-            onClose={onClose}
-          />
+        <TagsTooltip additionalTags={additionalTags}>
+          <TagButton tag={primaryTag} plus={additionalTags.length} />
         </TagsTooltip>
       ) : (
         <p>-</p>
@@ -67,15 +54,14 @@ export function TagColumn({
 function TagsTooltip({
   additionalTags,
   children,
-  onClose,
-}: PropsWithChildren<{ additionalTags: TagProps[]; onClose?: () => void }>) {
+}: PropsWithChildren<{ additionalTags: TagProps[] }>) {
   return !!additionalTags.length ? (
     <BadgeTooltip
       align="end"
       content={
         <div className="flex flex-wrap gap-1.5 rounded-md p-1">
           {additionalTags.map((tag) => (
-            <TagButton key={tag.id} tag={tag} onClose={onClose} />
+            <TagButton key={tag.id} tag={tag} />
           ))}
         </div>
       }
@@ -87,35 +73,34 @@ function TagsTooltip({
   );
 }
 
-function TagButton({
-  tag,
-  plus,
-  onClose,
-}: {
-  tag: TagProps;
-  plus?: number;
-  onClose?: () => void;
-}) {
-  const [tags, setTags] = useQueryState<string[]>("tags", {
-    parse: (value: string) => value.split(",").filter(Boolean),
-    serialize: (value: string[]) => value.join(","),
-  });
+function TagButton({ tag, plus }: { tag: TagProps; plus?: number }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  const selectedTagNames = useMemo(() => tags ?? [], [tags]);
+  const selectedTagIds =
+    searchParams?.get("tagIds")?.split(",")?.filter(Boolean) ?? [];
 
   const handleClick = () => {
-    const newTagNames = selectedTagNames.includes(tag.name)
-      ? selectedTagNames.filter((name: string) => name !== tag.name)
-      : [...selectedTagNames, tag.name];
+    const newTagIds = selectedTagIds.includes(tag.id)
+      ? selectedTagIds.filter((id) => id !== tag.id)
+      : [...selectedTagIds, tag.id];
 
-    if (newTagNames.length === 0) {
-      setTags(null);
+    const params = new URLSearchParams(searchParams?.toString());
+
+    if (newTagIds.length) {
+      params.set("tagIds", newTagIds.join(","));
     } else {
-      setTags(newTagNames);
+      params.delete("tagIds");
     }
-    onClose?.();
-  };
 
+    const paramString = params.toString();
+    router.push(
+      paramString ? `${pathname}?${paramString}` : `${pathname}`,
+      undefined,
+      { shallow: true },
+    );
+  };
   return (
     <button onClick={handleClick}>
       <TagBadge
@@ -123,7 +108,7 @@ function TagButton({
         color={tag.color as TagColorProps}
         withIcon
         plus={plus}
-        isSelected={selectedTagNames.includes(tag.name)}
+        isSelected={selectedTagIds.includes(tag.id)}
       />
     </button>
   );

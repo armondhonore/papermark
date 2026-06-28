@@ -109,11 +109,7 @@ export const conversationService = {
         messages: true,
         views: true,
         dataroom: true,
-        dataroomDocument: {
-          include: {
-            document: true,
-          },
-        },
+        dataroomDocument: true,
       },
     });
   },
@@ -141,11 +137,7 @@ export const conversationService = {
           participants: true,
           messages: includeMessages,
           dataroom: true,
-          dataroomDocument: {
-            include: {
-              document: true,
-            },
-          },
+          dataroomDocument: true,
         },
         orderBy: {
           updatedAt: "desc",
@@ -178,11 +170,7 @@ export const conversationService = {
           participants: true,
           messages: includeMessages,
           dataroom: true,
-          dataroomDocument: {
-            include: {
-              document: true,
-            },
-          },
+          dataroomDocument: true,
         },
         orderBy: {
           updatedAt: "desc",
@@ -295,34 +283,5 @@ export const conversationService = {
     }
 
     return { success: true, markedCount: conversation.messages.length };
-  },
-
-  // Delete a conversation and all related data
-  async deleteConversation(
-    conversationId: string,
-    userId: string,
-    dataroomId: string,
-    teamId: string,
-  ) {
-    // First verify the conversation exists and user has access
-    const conversation = await prisma.conversation.findUnique({
-      where: {
-        id: conversationId,
-        dataroomId,
-        teamId,
-        team: { users: { some: { userId } } },
-      },
-    });
-
-    if (!conversation) {
-      throw new Error("Conversation not found");
-    }
-
-    // Delete the conversation (cascade will handle related data like messages, participants, etc.)
-    await prisma.conversation.delete({
-      where: { id: conversationId },
-    });
-
-    return { success: true };
   },
 };

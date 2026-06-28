@@ -4,7 +4,6 @@ import { useTeam } from "@/context/team-context";
 import {
   ChevronDownIcon,
   CircleCheckIcon,
-  ExternalLinkIcon,
   FlagIcon,
   GlobeIcon,
   MoreVertical,
@@ -13,10 +12,7 @@ import {
   TrashIcon,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { toast } from "sonner";
 import { mutate } from "swr";
-
-import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -26,8 +22,9 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
+
+import { cn } from "@/lib/utils";
 
 import { useDeleteDomainModal } from "./delete-domain-modal";
 import DomainConfiguration from "./domain-configuration";
@@ -36,21 +33,15 @@ import { useDomainStatus } from "./use-domain-status";
 export default function DomainCard({
   domain,
   isDefault,
-  redirectUrl: initialRedirectUrl,
-  redirectsAllowed,
   onDelete,
 }: {
   domain: string;
   isDefault: boolean;
-  redirectUrl?: string | null;
-  redirectsAllowed: boolean;
   onDelete: (deletedDomain: string) => void;
 }) {
   const [showDetails, setShowDetails] = useState(false);
   const [groupHover, setGroupHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [redirectUrl, setRedirectUrl] = useState(initialRedirectUrl || "");
-  const [savingRedirect, setSavingRedirect] = useState(false);
 
   const domainRef = useRef<HTMLDivElement>(null);
 
@@ -73,34 +64,6 @@ export default function DomainCard({
     domain,
     onDelete,
   });
-
-  const handleSaveRedirectUrl = async () => {
-    setSavingRedirect(true);
-    try {
-      const response = await fetch(`/api/teams/${teamId}/domains/${domain}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ redirectUrl: redirectUrl || null }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        toast.error(data?.message || "Failed to save redirect URL");
-        return;
-      }
-
-      mutate(`/api/teams/${teamId}/domains`);
-      toast.success(
-        redirectUrl
-          ? "Root redirect URL saved"
-          : "Root redirect URL removed",
-      );
-    } catch {
-      toast.error("Failed to save redirect URL");
-    } finally {
-      setSavingRedirect(false);
-    }
-  };
 
   const handleMakeDefault = async () => {
     const response = await fetch(`/api/teams/${teamId}/domains/${domain}`, {
@@ -136,8 +99,16 @@ export default function DomainCard({
               </div>
             </div>
             <div className="overflow-hidden">
-              <div className="flex items-center gap-1.5 truncate text-sm font-medium sm:gap-2.5">
-                {domain}
+              <div className="flex items-center gap-1.5 sm:gap-2.5">
+                <a
+                  href={`http://${domain}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="truncate text-sm font-medium"
+                  title={domain}
+                >
+                  {domain}
+                </a>
 
                 {isDefault ? (
                   <span className="xs:px-3 xs:py-1 flex items-center gap-1 rounded-full bg-sky-400/[.15] px-1.5 py-0.5 text-xs font-medium text-sky-600">
@@ -269,45 +240,6 @@ export default function DomainCard({
           ) : (
             <div className="mt-6 h-6 w-32 animate-pulse rounded-md bg-gray-200 dark:bg-gray-400" />
           )}
-
-          {/* Root domain redirect */}
-          <div className="mt-4 rounded-lg border border-gray-200 p-4 dark:border-gray-400">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <ExternalLinkIcon className="h-4 w-4" />
-              Root Domain Redirect
-            </div>
-            {redirectsAllowed ? (
-              <>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Redirect visitors who land on{" "}
-                  <span className="font-medium">{domain}</span> to a specific
-                  URL. Leave empty to redirect to papermark.com.
-                </p>
-                <div className="mt-3 flex items-center gap-2">
-                  <Input
-                    type="url"
-                    placeholder="https://example.com"
-                    value={redirectUrl}
-                    onChange={(e) => setRedirectUrl(e.target.value)}
-                    className="h-9 flex-1"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={handleSaveRedirectUrl}
-                    disabled={savingRedirect}
-                    className="h-9 shrink-0"
-                  >
-                    {savingRedirect ? "Saving..." : "Save"}
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Root domain redirects require a{" "}
-                <span className="font-semibold">Business</span> plan or higher.
-              </p>
-            )}
-          </div>
         </motion.div>
       </div>
       <DeleteDomainModal />

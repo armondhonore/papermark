@@ -1,24 +1,9 @@
 "use client";
 
+import { type RunStatus } from "@trigger.dev/core/v3";
 import { useRealtimeRunsWithTag } from "@trigger.dev/react-hooks";
 
 import { parseStatus } from "@/lib/utils/generate-trigger-status";
-
-// INFO: This is the same as the RunStatus type in @trigger.dev/core/v3. Wait until it's exported from the package.
-type RunStatus =
-  | "PENDING_VERSION"
-  | "QUEUED"
-  | "DEQUEUED"
-  | "EXECUTING"
-  | "WAITING"
-  | "COMPLETED"
-  | "CANCELED"
-  | "FAILED"
-  | "CRASHED"
-  | "SYSTEM_FAILURE"
-  | "DELAYED"
-  | "EXPIRED"
-  | "TIMED_OUT";
 
 interface IDocumentProgressStatus {
   state: RunStatus;
@@ -40,7 +25,7 @@ export function useDocumentProgressStatus(
 
   // Find the most recent active run (QUEUED or EXECUTING)
   const activeRun = runs.find((run) =>
-    ["QUEUED", "EXECUTING", "WAITING"].includes(run.status),
+    ["QUEUED", "EXECUTING"].includes(run.status),
   );
 
   const status: IDocumentProgressStatus = {

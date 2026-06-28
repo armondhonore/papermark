@@ -21,15 +21,8 @@ export default function useDocuments() {
   const paginationParams =
     searchQuery || sortQuery ? `&page=${page}&limit=${pageSize}` : "";
 
-  const queryParts = [];
-  if (searchQuery) queryParts.push(`query=${searchQuery}`);
-  if (sortQuery) queryParts.push(`sort=${sortQuery}`);
-  if (paginationParams) queryParts.push(paginationParams.substring(1));
-  const queryString = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
-
   const { data, isValidating, error } = useSWR<{
     documents: DocumentWithLinksAndLinkCountAndViewCount[];
-    folders?: FolderWithCountAndPath[];
     pagination?: {
       total: number;
       pages: number;
@@ -37,7 +30,13 @@ export default function useDocuments() {
       pageSize: number;
     };
   }>(
-    teamId && `/api/teams/${teamId}/documents${queryString}`,
+    teamId &&
+      `/api/teams/${teamId}/documents?${
+        searchQuery ? `query=${searchQuery}` : ""
+      }${sortQuery ? `&sort=${sortQuery}` : ""}${paginationParams}`.replace(
+        /^\?&/,
+        "?",
+      ),
     fetcher,
     {
       revalidateOnFocus: false,
@@ -48,7 +47,6 @@ export default function useDocuments() {
 
   return {
     documents: data?.documents || [],
-    searchFolders: data?.folders,
     pagination: data?.pagination,
     isValidating,
     loading: !data && !error,
@@ -64,8 +62,8 @@ export function useFolderDocuments({ name }: { name: string[] }) {
     DocumentWithLinksAndLinkCountAndViewCount[]
   >(
     teamInfo?.currentTeam?.id &&
-    name.length > 0 &&
-      `/api/teams/${teamInfo?.currentTeam?.id}/folder-documents/${name.join("/")}`,
+      name &&
+      `/api/teams/${teamInfo?.currentTeam?.id}/folders/documents/${name.join("/")}`,
     fetcher,
     {
       revalidateOnFocus: false,
@@ -87,27 +85,17 @@ export type FolderWithCount = Folder & {
   };
 };
 
-export type FolderWithCountAndPath = FolderWithCount & {
-  folderList: string[];
-};
-
 export function useFolder({ name }: { name: string[] }) {
   const teamInfo = useTeam();
-  const router = useRouter();
 
   const { data: folders, error } = useSWR<FolderWithCount[]>(
     teamInfo?.currentTeam?.id &&
-    name.length > 0 &&
+      name &&
       `/api/teams/${teamInfo?.currentTeam?.id}/folders/${name.join("/")}`,
     fetcher,
     {
       revalidateOnFocus: false,
       dedupingInterval: 30000,
-      onError: (err) => {
-        if (err.status === 404) {
-          router.replace("/documents");
-        }
-      },
     },
   );
 
@@ -164,30 +152,5 @@ export function useRootFolders() {
     folders,
     loading: !folders && !error,
     error,
-  };
-}
-
-export function useHiddenDocuments() {
-  const teamInfo = useTeam();
-
-  const { data, error, mutate } = useSWR<{
-    folders: FolderWithCount[];
-    documents: DocumentWithLinksAndLinkCountAndViewCount[];
-  }>(
-    teamInfo?.currentTeam?.id &&
-      `/api/teams/${teamInfo?.currentTeam?.id}/documents/hidden`,
-    fetcher,
-    {
-      revalidateOnFocus: false,
-      dedupingInterval: 30000,
-    },
-  );
-
-  return {
-    folders: data?.folders,
-    documents: data?.documents,
-    loading: !data && !error,
-    error,
-    mutate,
   };
 }

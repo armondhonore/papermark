@@ -9,7 +9,6 @@ import {
 } from "@/lib/api/links/link-data";
 import prisma from "@/lib/prisma";
 import { log } from "@/lib/utils";
-import { checkGlobalBlockList } from "@/lib/utils/global-block-list";
 
 export default async function handle(
   req: NextApiRequest,
@@ -49,17 +48,13 @@ export default async function handle(
           allowDownload: true,
           password: true,
           isArchived: true,
-          deletedAt: true,
           enableCustomMetatag: true,
           enableFeedback: true,
           enableScreenshotProtection: true,
-          enableConfidentialView: true,
-          enableIndexFile: true,
           metaTitle: true,
           metaDescription: true,
           metaImage: true,
           metaFavicon: true,
-          welcomeMessage: true,
           enableQuestion: true,
           dataroomId: true,
           linkType: true,
@@ -75,13 +70,11 @@ export default async function handle(
           enableWatermark: true,
           watermarkConfig: true,
           groupId: true,
-          permissionGroupId: true,
           audienceType: true,
           teamId: true,
           team: {
             select: {
               plan: true,
-              globalBlockList: true,
             },
           },
           customFields: {
@@ -123,25 +116,6 @@ export default async function handle(
         });
       }
 
-      if (link.deletedAt) {
-        return res.status(404).json({
-          error: "Link has been deleted",
-          message: "This link has been deleted",
-        });
-      }
-
-      const { email } = req.query as { email?: string };
-      const globalBlockCheck = checkGlobalBlockList(
-        email,
-        link.team?.globalBlockList,
-      );
-      if (globalBlockCheck.error) {
-        return res.status(400).json({ message: globalBlockCheck.error });
-      }
-      if (globalBlockCheck.isBlocked) {
-        return res.status(403).json({ message: "Access denied" });
-      }
-
       const teamPlan = link.team?.plan || "free";
       const teamId = link.teamId;
       // if owner of document is on free plan, return 404
@@ -158,26 +132,6 @@ export default async function handle(
       }
 
       const linkType = link.linkType;
-
-      // Handle workflow links separately
-      if (linkType === "WORKFLOW_LINK") {
-        // For workflow links, fetch brand if available
-        let brand: Partial<Brand> | null = null;
-        if (link.teamId) {
-          const teamBrand = await prisma.brand.findUnique({
-            where: { teamId: link.teamId },
-            select: {
-              logo: true,
-              brandColor: true,
-              accentColor: true,
-            },
-          });
-          brand = teamBrand;
-        }
-
-        return res.status(200).json({ linkType, brand, linkId: link.id });
-      }
-
       let brand: Partial<Brand> | Partial<DataroomBrand> | null = null;
       let linkData: any;
 
@@ -197,7 +151,6 @@ export default async function handle(
             linkId: link.id,
             teamId: link.teamId!,
             dataroomDocumentId: documentId,
-            permissionGroupId: link.permissionGroupId || undefined,
             ...(link.audienceType === LinkAudienceType.GROUP &&
               link.groupId && {
                 groupId: link.groupId,
@@ -208,9 +161,7 @@ export default async function handle(
         } else {
           const data = await fetchDataroomLinkData({
             linkId: link.id,
-            dataroomId: link.dataroomId,
             teamId: link.teamId!,
-            permissionGroupId: link.permissionGroupId || undefined,
             ...(link.audienceType === LinkAudienceType.GROUP &&
               link.groupId && {
                 groupId: link.groupId,
@@ -218,8 +169,6 @@ export default async function handle(
           });
           linkData = data.linkData;
           brand = data.brand;
-          // Include access controls in the link data for the frontend
-          linkData.accessControls = data.accessControls;
         }
         console.timeEnd("get-dataroom-link-data");
       }
@@ -235,7 +184,6 @@ export default async function handle(
           customFields: [], // reset custom fields for free plan
           enableAgreement: false,
           enableWatermark: false,
-          permissionGroupId: null,
         }),
       };
 

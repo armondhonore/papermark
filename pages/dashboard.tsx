@@ -4,12 +4,9 @@ import { useRef, useState } from "react";
 
 import { useTeam } from "@/context/team-context";
 import { addDays, format } from "date-fns";
-import { BarChart3, FileTextIcon, LinkIcon } from "lucide-react";
+import { BarChart3 } from "lucide-react";
 import { toast } from "sonner";
 import useSWR from "swr";
-
-import { usePlan } from "@/lib/swr/use-billing";
-import { fetcher } from "@/lib/utils";
 
 import { AnalyticsCard } from "@/components/analytics/analytics-card";
 import DashboardViewsChart from "@/components/analytics/dashboard-views-chart";
@@ -24,6 +21,9 @@ import VisitorsTable from "@/components/analytics/visitors-table";
 import AppLayout from "@/components/layouts/app";
 import { TabMenu } from "@/components/tab-menu";
 
+import { usePlan } from "@/lib/swr/use-billing";
+import { fetcher } from "@/lib/utils";
+
 interface OverviewData {
   counts: {
     links: number;
@@ -35,7 +35,6 @@ interface OverviewData {
     date: string;
     views: number;
   }[];
-  hasLinks?: boolean;
 }
 export const defaultRange = {
   start: addDays(new Date(), -7),
@@ -72,9 +71,7 @@ export default function DashboardPage() {
     isLoading,
     error,
   } = useSWR<OverviewData>(
-    teamInfo?.currentTeam?.id
-      ? `/api/analytics?type=overview&interval=${interval}&teamId=${teamInfo.currentTeam.id}${interval === "custom" ? `&startDate=${format(customRange.start, "MM-dd-yyyy")}&endDate=${format(customRange.end, "MM-dd-yyyy")}` : ""}`
-      : null,
+    `/api/analytics?type=overview&interval=${interval}&teamId=${teamInfo?.currentTeam?.id}${interval === "custom" ? `&startDate=${format(customRange.start, "MM-dd-yyyy")}&endDate=${format(customRange.end, "MM-dd-yyyy")}` : ""}`,
     fetcher,
     {
       keepPreviousData: true,
@@ -121,17 +118,11 @@ export default function DashboardPage() {
     });
   };
 
-  const hasNoActivity =
-    !isLoading && overview && overview.counts.views === 0;
-  const hasLinks = overview?.hasLinks ?? false;
-  const showEmptyOverlay = hasNoActivity && !hasLinks;
-  const showSharePrompt = hasNoActivity && hasLinks;
-
   return (
     <AppLayout>
       <div className="flex-1 space-y-4 p-4 pt-6 md:p-8">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold tracking-tight sm:text-3xl">Dashboard</h2>
+          <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
           <TimeRangeSelect
             value={interval}
             onChange={handleTimeRangeChange}
@@ -143,36 +134,18 @@ export default function DashboardPage() {
           />
         </div>
 
-        <div className="relative space-y-4">
+        <div className="space-y-4">
           <AnalyticsCard
             title="Views Overview"
             icon={<BarChart3 className="h-4 w-4" />}
             contentClassName="space-y-4"
           >
-            <div className="relative">
-              <DashboardViewsChart
-                timeRange={interval}
-                data={overview?.graph}
-                startDate={customRange.start}
-                endDate={customRange.end}
-              />
-              {showSharePrompt && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="rounded-lg border bg-background/95 px-6 py-4 shadow-lg backdrop-blur-sm">
-                    <div className="flex flex-col items-center gap-2 text-center">
-                      <LinkIcon className="h-8 w-8 text-muted-foreground" />
-                      <p className="text-sm font-medium text-foreground">
-                        Share your link to see activity
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        
-                        Share your document or data room link with your audience
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            <DashboardViewsChart
+              timeRange={interval}
+              data={overview?.graph}
+              startDate={customRange.start}
+              endDate={customRange.end}
+            />
           </AnalyticsCard>
 
           <TabMenu
@@ -199,14 +172,13 @@ export default function DashboardPage() {
                 count: overview?.counts.visitors,
               },
               {
-                label: "Recent Views",
+                label: "Recent Visits",
                 href: `/dashboard?interval=${interval}&type=views`,
                 value: "views",
                 currentValue: type,
                 count: overview?.counts.views,
               },
             ]}
-            className="z-10"
           />
 
           <div className="grid grid-cols-1">
@@ -235,32 +207,6 @@ export default function DashboardPage() {
               />
             )}
           </div>
-
-          {showEmptyOverlay && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/60 backdrop-blur-[2px]">
-              <div className="max-w-md rounded-xl border bg-background p-8 shadow-lg">
-                <div className="flex flex-col items-center gap-4 text-center">
-                  <div className="flex gap-3">
-                    <div className="rounded-full border bg-muted p-3">
-                      <FileTextIcon className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <div className="rounded-full border bg-muted p-3">
-                      <LinkIcon className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-foreground">
-                      No activity yet
-                    </h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Start sharing documents and data rooms to see visitor
-                      activity and engagement analytics here.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </AppLayout>

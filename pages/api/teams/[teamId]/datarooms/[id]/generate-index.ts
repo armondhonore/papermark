@@ -5,7 +5,6 @@ import { ItemType } from "@prisma/client";
 import { getServerSession } from "next-auth/next";
 
 import { generateDataroomIndex } from "@/lib/dataroom/index-generator";
-import { getFeatureFlags } from "@/lib/featureFlags";
 import prisma from "@/lib/prisma";
 import { CustomUser, LinkWithDataroom } from "@/lib/types";
 import { IndexFileFormat } from "@/lib/types/index-file";
@@ -76,7 +75,6 @@ export default async function handle(
         domainId: true,
         domainSlug: true,
         groupId: true,
-        permissionGroupId: true,
         dataroom: {
           select: {
             id: true,
@@ -99,13 +97,7 @@ export default async function handle(
       },
     });
 
-    if (
-      !link ||
-      !link.dataroom ||
-      link.dataroom.id !== dataroomId ||
-      link.teamId !== teamId ||
-      link.dataroom.teamId !== teamId
-    ) {
+    if (!link || !link.dataroom || link.dataroom.id !== dataroomId) {
       return res.status(404).json({ error: "Link not found" });
     }
 
@@ -147,35 +139,6 @@ export default async function handle(
       );
     }
 
-    // Check if the link has permission group restrictions and filter accordingly
-    if (link.permissionGroupId) {
-      const permissionGroupAccessControls =
-        await prisma.permissionGroupAccessControls.findMany({
-          where: {
-            groupId: link.permissionGroupId,
-            OR: [{ canView: true }, { canDownload: true }],
-          },
-          select: {
-            itemId: true,
-            itemType: true,
-          },
-        });
-
-      const allowedDocuments = permissionGroupAccessControls
-        .filter((control) => control.itemType === ItemType.DATAROOM_DOCUMENT)
-        .map((control) => control.itemId);
-      const allowedFolders = permissionGroupAccessControls
-        .filter((control) => control.itemType === ItemType.DATAROOM_FOLDER)
-        .map((control) => control.itemId);
-
-      link.dataroom.documents = link.dataroom.documents.filter((doc) =>
-        allowedDocuments.includes(doc.id),
-      );
-      link.dataroom.folders = link.dataroom.folders.filter((folder) =>
-        allowedFolders.includes(folder.id),
-      );
-    }
-
     // Map updatedAt to lastUpdatedAt for the dataroom and transform document versions
     // @ts-ignore
     const linkWithDataroom: LinkWithDataroom = {
@@ -188,9 +151,7 @@ export default async function handle(
           id: doc.id,
           folderId: doc.folderId,
           orderIndex: doc.orderIndex,
-          updatedAt: doc.updatedAt,
           createdAt: doc.createdAt,
-          hierarchicalIndex: doc.hierarchicalIndex,
           document: {
             id: doc.document.id,
             name: doc.document.name,
@@ -203,19 +164,12 @@ export default async function handle(
               isVertical: version.isVertical,
               numPages: version.numPages,
               updatedAt: version.updatedAt,
-              fileSize:
-                typeof version.fileSize === "bigint"
-                  ? Number(version.fileSize)
-                  : version.fileSize,
+              fileSize: version.fileSize,
             })),
           },
         })),
       },
     };
-
-    const { dataroomIndex } = await getFeatureFlags({
-      teamId: link.dataroom.teamId,
-    });
 
     // Generate the index file using the appropriate generator
     const { data, filename, mimeType } = await generateDataroomIndex(
@@ -225,7 +179,6 @@ export default async function handle(
         baseUrl: link.domainId
           ? `${link.domainSlug}/${link.slug}`
           : `${process.env.NEXT_PUBLIC_MARKETING_URL}/view/${link.id}`,
-        showHierarchicalIndex: dataroomIndex,
       },
     );
 

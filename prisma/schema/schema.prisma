@@ -48,7 +48,6 @@ model User {
   sessions       Session[]
   documents      Document[]
   teams          UserTeam[]
-  userDatarooms  UserDataroom[]
   domains        Domain[]
   chats          Chat[]
   contactId      String?
@@ -63,58 +62,79 @@ model User {
   // conversation
   participatedConversations ConversationParticipant[]
   messages                  Message[]
-
-  // FAQ system
-  publishedFaqItems  DataroomFaqItem[]
-  createdAnnotations DocumentAnnotation[] // Annotations created by this user
-
-  installedIntegrations InstalledIntegration[]
-
-  links Link[] @relation("LinkOwner")
-
-  frozenDatarooms Dataroom[] @relation("frozenDatarooms")
-
-  // request list (task system)
-  createdTasks   Task[]         @relation("createdTasks")
-  taskActivities TaskActivity[] @relation("taskActivities")
-
-  notificationPreferences NotificationPreference[]
 }
 
-model Brand {
-  id                             String  @id @default(cuid())
-  logo                           String? // This should be a reference to where the file is stored (S3, Google Cloud Storage, etc.)
-  banner                         String? // Banner image for dataroom view (fallback)
-  brandColor                     String? // This should be a reference to the brand color
-  accentColor                    String? // This should be a reference to the accent color (front-page background)
-  accentButtonColor              String? // Color used for CTA buttons (separate from brand/background)
-  applyAccentColorToDataroomView Boolean @default(false) // Global default for whether accentColor applies to dataroom list/tree viewer background
-  welcomeMessage                 String? // This should be a reference to the welcome message
-  ctaLabel                       String? // Default CTA button label (inherited by datarooms unless overridden)
-  ctaUrl                         String? // Default CTA button URL (inherited by datarooms unless overridden)
+model Team {
+  id           String        @id @default(cuid())
+  name         String
+  users        UserTeam[]
+  documents    Document[]
+  folders      Folder[]
+  domains      Domain[]
+  invitations  Invitation[]
+  sentEmails   SentEmail[]
+  brand        Brand?
+  datarooms    Dataroom[]
+  agreements   Agreement[]
+  viewerGroups ViewerGroup[]
+  viewers      Viewer[]
 
-  cardLayout            String  @default("LIST")
-  showFolderTree        Boolean @default(true)
-  viewerLayoutPreset    String  @default("STANDARD")
-  viewerHeaderStyle     String  @default("DEFAULT")
-  hideFolderIconsInMain Boolean @default(false)
+  links Link[]
+  views View[]
 
-  // Default Open Graph / social preview for shared links (per-link settings override)
-  customLinkPreviewEnabled Boolean @default(false)
-  linkPreviewTitle         String?
-  linkPreviewDescription   String?
-  linkPreviewImage         String?
-  linkPreviewFavicon       String?
+  plan           String    @default("free")
+  stripeId       String?   @unique // Stripe customer ID
+  subscriptionId String?   @unique // Stripe subscription ID
+  startsAt       DateTime? // Stripe subscription start date
+  endsAt         DateTime? // Stripe subscription end date
 
-  // Visitor-side language (i18n) settings — applies to the access form and
-  // document viewer chrome shown to people who open a shared link.
-  defaultLanguage String @default("en") // BCP-47 tag from SUPPORTED_LOCALES; admin-chosen viewer language
+  linkPresets LinkPreset[] // Link presets for the team
 
-  teamId String @unique
-  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  limits Json? // Plan limits // {datarooms: 1, users: 1, domains: 1, customDomainOnPro: boolean, customDomainInDataroom: boolean}
+
+  incomingWebhooks IncomingWebhook[]
+  restrictedTokens RestrictedToken[]
+  webhooks         Webhook[]
+
+  conversations Conversation[]
+
+  uploadedDocuments DocumentUpload[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  Tag       Tag[]
+}
+
+model Brand {
+  id          String  @id @default(cuid())
+  logo        String? // This should be a reference to where the file is stored (S3, Google Cloud Storage, etc.)
+  brandColor  String? // This should be a reference to the brand color
+  accentColor String? // This should be a reference to the accent color
+  teamId      String  @unique
+  team        Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  MEMBER
+}
+
+model UserTeam {
+  role   Role   @default(MEMBER)
+  userId String
+  teamId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  notificationPreferences Json? // Format: { yearInReview: { "enabled": false } }
+
+  @@id([userId, teamId])
+  @@index([userId])
+  @@index([teamId])
 }
 
 model VerificationToken {
@@ -123,6 +143,92 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model Document {
+  id                   String              @id @default(cuid())
+  name                 String
+  description          String?
+  file                 String // This should be a reference to where the file is stored (S3, Google Cloud Storage, etc.)
+  originalFile         String? // This should be a reference to the original file like pptx, xlsx, etc. (S3, Google Cloud Storage, etc.)
+  type                 String? // This should be a reference to the file type (pdf, sheet, etc.)
+  contentType          String? // This should be the actual contentType of the file like application/pdf, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, etc.
+  storageType          DocumentStorageType @default(VERCEL_BLOB)
+  numPages             Int? // This should be a reference to the number of pages in the document
+  owner                User?               @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  teamId               String
+  team                 Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  ownerId              String? // This field holds the foreign key.
+  assistantEnabled     Boolean             @default(false) // This indicates if assistant is enabled for this document
+  advancedExcelEnabled Boolean             @default(false) // This indicates if advanced Excel is enabled for this document
+  downloadOnly         Boolean             @default(false) // Indicates if the document is download only
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  links                Link[]
+  views                View[]
+  versions             DocumentVersion[]
+  chats                Chat[]
+
+  folderId String? // Optional Folder ID for documents in folders
+  folder   Folder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
+  datarooms   DataroomDocument[] // Datarooms associated with this document
+  tags TagItem[]
+
+  // upload external documents
+  uploadedDocument DocumentUpload[]
+  isExternalUpload Boolean          @default(false) // Indicates if the document is an external upload
+
+  @@index([ownerId])
+  @@index([teamId])
+  @@index([folderId])
+}
+
+model DocumentVersion {
+  id            String              @id @default(cuid())
+  versionNumber Int // e.g., 1, 2, 3 for version control
+  document      Document            @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId    String
+  file          String // This should be a reference to where the file is stored (S3, Google Cloud Storage, etc.)
+  originalFile  String? // This should be a reference to the original file like pptx, xlsx, etc. (S3, Google Cloud Storage, etc.)
+  type          String? // This should be a reference to the file type (pdf, docx, etc.)
+  contentType   String? // This should be the actual contentType of the file like application/pdf, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, etc.
+  fileSize      Int? // This should be the size of the file in bytes
+  storageType   DocumentStorageType @default(VERCEL_BLOB)
+  numPages      Int? // This should be a reference to the number of pages in the document
+  isPrimary     Boolean             @default(false) // Indicates if this is the primary version
+  isVertical    Boolean             @default(false) // Indicates if the document is vertical (portrait) or not (landscape)
+  fileId        String? // This is the file ID of the OpenAI File API
+  pages         DocumentPage[]
+  hasPages      Boolean             @default(false) // Indicates if the document has pages
+  length        Int? // This is the length of the video in seconds
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@unique([versionNumber, documentId])
+  @@index([documentId])
+}
+
+model DocumentPage {
+  id            String              @id @default(cuid())
+  version       DocumentVersion     @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  versionId     String
+  pageNumber    Int // e.g., 1, 2, 3 for 
+  embeddedLinks String[]
+  pageLinks     Json? // This will store the page links data: [{href: "https://example.com", coords: "0,0,100,100"}]
+  metadata      Json? // This will store the page metadata: {originalWidth: 100, origianlHeight: 100, scaledWidth: 50, scaledHeight: 50, scaleFactor: 2}
+  file          String // This should be a reference to where the file / page is stored (S3, Google Cloud Storage, etc.)
+  storageType   DocumentStorageType @default(VERCEL_BLOB)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@unique([pageNumber, versionId])
+  @@index([versionId])
+}
+
+enum DocumentStorageType {
+  S3_PATH
+  VERCEL_BLOB
 }
 
 model Domain {
@@ -134,7 +240,6 @@ model Domain {
   Team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   verified    Boolean  @default(false) // Whether the domain has been verified
   isDefault   Boolean  @default(false) // Whether the domain is the primary domain
-  redirectUrl String? // URL to redirect to when visiting the root of this domain
   lastChecked DateTime @default(now())
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -146,7 +251,7 @@ model Domain {
 
 model View {
   id                  String               @id @default(cuid())
-  link                Link                 @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  link                Link                 @relation(fields: [linkId], references: [id])
   linkId              String
   document            Document?            @relation(fields: [documentId], references: [id], onDelete: Cascade)
   documentId          String?
@@ -158,8 +263,6 @@ model View {
   verified            Boolean              @default(false) // Whether the viewer email has been verified
   viewedAt            DateTime             @default(now())
   downloadedAt        DateTime? // This is the time the document was downloaded
-  downloadType        DownloadType? // Type of download: SINGLE, BULK, or FOLDER
-  downloadMetadata    Json? // Metadata about the download (folder name, document list, etc.)
   reactions           Reaction[]
   viewType            ViewType             @default(DOCUMENT_VIEW)
   viewerId            String? // This is the viewer ID from the dataroom
@@ -179,12 +282,6 @@ model View {
 
   uploadedDocuments DocumentUpload[] // uploaded documents by this view
 
-  // request list (task system) — activity authored during this view
-  taskActivities TaskActivity[]
-
-  // AI chats
-  chats Chat[]
-
   teamId String?
   team   Team?   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
@@ -192,25 +289,12 @@ model View {
   @@index([documentId])
   @@index([dataroomId])
   @@index([dataroomViewId])
-  @@index([viewerId])
-  @@index([groupId]) // Performance optimization for groupBy queries on groupId
   @@index([teamId])
-  @@index([viewedAt(sort: Desc)]) // Performance optimization for date aggregations
-  @@index([viewerId, documentId]) // Performance optimization for joins with filtering
-  @@index([viewerEmail]) // Performance optimization for viewer email filtering
-  @@index([documentId, isArchived]) // Performance optimization for active views filtering
-  @@index([documentId, viewedAt(sort: Desc)]) // Performance optimization for latest views queries
 }
 
 enum ViewType {
   DOCUMENT_VIEW
   DATAROOM_VIEW
-}
-
-enum DownloadType {
-  SINGLE // Individual document download
-  BULK // Full dataroom bulk download
-  FOLDER // Folder download
 }
 
 model Viewer {
@@ -227,18 +311,10 @@ model Viewer {
 
   views                     View[]
   groups                    ViewerGroupMembership[]
-  invitations               ViewerInvitation[]
   participatedConversations ConversationParticipant[]
   messages                  Message[]
 
   uploadedDocuments DocumentUpload[] // uploaded documents by this viewer
-
-  // request list (task system)
-  taskAssignments TaskAssignment[]
-  taskActivities  TaskActivity[]
-
-  // AI chats
-  chats Chat[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -257,7 +333,6 @@ model Reaction {
   createdAt  DateTime @default(now())
 
   @@index([viewId])
-  @@index([viewId, type]) // Performance optimization for reaction grouping
 }
 
 model Invitation {
@@ -267,13 +342,6 @@ model Invitation {
   team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   token     String   @unique
-
-  // Role the invitee will be assigned on acceptance. Defaults to MEMBER to
-  // preserve historic behaviour for invitations created before this column.
-  role        Role     @default(MEMBER)
-  // Datarooms the invitee is scoped to, applied as UserDataroom rows on
-  // acceptance. Only meaningful when role == DATAROOM_MEMBER.
-  dataroomIds String[] @default([])
 
   @@unique([email, teamId])
 }
@@ -300,66 +368,36 @@ model SentEmail {
 }
 
 model Chat {
-  id    String  @id @default(cuid())
-  title String? // Generated title from first message
-
-  // Context associations
-  teamId String
-  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
-
-  documentId String?
-  document   Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
-
-  dataroomId String?
-  dataroom   Dataroom? @relation(fields: [dataroomId], references: [id], onDelete: Cascade)
-
-  linkId String?
-  link   Link?   @relation(fields: [linkId], references: [id], onDelete: Cascade)
-
-  viewId String?
-  view   View?   @relation(fields: [viewId], references: [id], onDelete: Cascade)
-
-  // User associations (internal or external)
-  userId String?
-  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  viewerId String?
-  viewer   Viewer? @relation(fields: [viewerId], references: [id], onDelete: Cascade)
-
-  // OpenAI references
-  vectorStoreId String? // The vector store used for this chat
-
-  messages ChatMessage[]
-
+  id            String    @id @default(cuid())
+  threadId      String    @unique // This is the thread ID from OpenAI Assistant API
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  document      Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId    String
   createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  lastMessageAt DateTime? // Track latest activity
+  lastMessageAt DateTime? // This is the last time a message was sent in the thread
 
-  @@index([teamId])
-  @@index([documentId])
-  @@index([dataroomId])
-  @@index([linkId])
-  @@index([userId])
-  @@index([viewerId])
-  @@index([viewId])
-  @@index([createdAt(sort: Desc)])
+  @@unique([userId, documentId])
+  @@unique([threadId, documentId])
+  @@index([threadId])
 }
 
-model ChatMessage {
-  id     String @id @default(cuid())
-  chatId String
-  chat   Chat   @relation(fields: [chatId], references: [id], onDelete: Cascade)
-
-  role    String // "user" | "assistant" | "system"
-  content String @db.Text
-
-  // Optional structured data
-  metadata Json? // Store sources, page numbers, confidence scores, etc.
+model Folder {
+  id           String     @id @default(cuid())
+  name         String
+  path         String // the materialized path to the folder; starts always with "/"
+  parentId     String?
+  documents    Document[]
+  childFolders Folder[]   @relation("SubFolders")
+  parentFolder Folder?    @relation("SubFolders", fields: [parentId], references: [id], onDelete: SetNull)
+  teamId       String
+  team         Team       @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@index([chatId])
-  @@index([chatId, createdAt])
+  @@unique([teamId, path])
+  @@index([parentId])
 }
 
 model Feedback {
@@ -392,15 +430,9 @@ model FeedbackResponse {
 }
 
 model Agreement {
-  id              String @id @default(cuid())
-  name            String // Easily identifiable name for the agreement
-  content         String // This will store the agreement content (URL or text)
-  contentType     String @default("LINK") // "LINK" or "TEXT" - determines how content should be displayed
-  signingProvider String @default("LEGACY")
-
-  signingExternalId String? @unique
-  signingEnvelopeId String?
-  signingTemplateId String?
+  id      String @id @default(cuid())
+  name    String // Easily identifiable name for the agreement
+  content String // This will store the agreement content
 
   links     Link[]
   responses AgreementResponse[]
@@ -423,35 +455,14 @@ model AgreementResponse {
   id          String    @id @default(cuid())
   agreementId String
   agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
-  viewId      String?   @unique
-  view        View?     @relation(fields: [viewId], references: [id], onDelete: Cascade)
-
-  linkId String?
-
-  signerEmail String?
-  signerName  String?
-
-  signingStatus     String    @default("PENDING")
-  signingExternalId String?   @unique
-  signingEnvelopeId String?
-  signingDocumentId Int?
-  signedAt          DateTime?
-  completedAt       DateTime?
-
-  // Papermark-side mirror of the signed PDF. Populated by the signing webhook
-  // once the document is final so downloads can be served from our own storage
-  // without depending on Documenso's uptime.
-  signedFileKey         String?
-  signedFileName        String?
-  signedFileStorageType DocumentStorageType?
+  viewId      String    @unique
+  view        View      @relation(fields: [viewId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([agreementId])
   @@index([viewId])
-  @@index([linkId])
-  @@index([signerEmail])
 }
 
 model IncomingWebhook {
@@ -475,32 +486,25 @@ model IncomingWebhook {
 }
 
 model RestrictedToken {
-  id          String    @id @default(cuid())
-  name        String
-  hashedKey   String    @unique
-  partialKey  String
-  scopes      String? // space separated. Either a single preset ("apis.all" or "apis.read") or a granular list (e.g. "documents.write links.write"). Null is legacy and migrated to "apis.all" by 20260425000000_normalize_token_scopes.
-  mode        String    @default("live") // "live" | "test"
-  source      String    @default("dashboard") // "dashboard" | "oauth"
-  subjectType String    @default("user") // validated in app code via Zod; "user" keys are revoked when the owner loses team access, "machine" keys stay team-scoped
-  clientId    String? // references OAuthClient.id for tokens issued via OAuth
-  expires     DateTime?
-  lastUsed    DateTime?
-  rateLimit   Int       @default(60) // rate limit per minute
+  id         String    @id @default(cuid())
+  name       String
+  hashedKey  String    @unique
+  partialKey String
+  scopes     String? // comma separated (Eg: "documents:write,links:write")
+  expires    DateTime?
+  lastUsed   DateTime?
+  rateLimit  Int       @default(60) // rate limit per minute
 
-  userId      String
-  teamId      String
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  team        Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  oauthClient OAuthClient? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  userId String
+  teamId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([teamId])
-  @@index([hashedKey])
-  @@index([clientId])
 }
 
 model Webhook {
@@ -537,6 +541,44 @@ model YearInReview {
   @@index([teamId])
 }
 
+model DocumentUpload {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  teamId     String
+  team       Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  viewerId   String?
+  viewer     Viewer?  @relation(fields: [viewerId], references: [id], onDelete: SetNull)
+  viewId     String?
+  view       View?    @relation(fields: [viewId], references: [id], onDelete: SetNull)
+  linkId     String
+  link       Link     @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  // Optional dataroom relations
+  dataroomId         String?
+  dataroom           Dataroom?         @relation(fields: [dataroomId], references: [id], onDelete: SetNull)
+  dataroomDocumentId String?
+  dataroomDocument   DataroomDocument? @relation(fields: [dataroomDocumentId], references: [id], onDelete: SetNull)
+
+  // Additional metadata
+  originalFilename String?
+  fileSize         Int?
+  numPages         Int?
+  mimeType         String?
+  uploadedAt       DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([documentId])
+  @@index([viewerId])
+  @@index([viewId])
+  @@index([linkId])
+  @@index([teamId])
+  @@index([dataroomId])
+  @@index([dataroomDocumentId])
+}
+
 enum TagType {
   LINK_TAG
   DOCUMENT_TAG
@@ -544,19 +586,19 @@ enum TagType {
 }
 
 model Tag {
-  id          String  @id @default(cuid())
+  id          String       @id @default(cuid())
   name        String
   color       String
   description String?
 
-  teamId String
-  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId      String
+  team        Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  
+  items       TagItem[]
 
-  items TagItem[]
-
-  createdBy String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdBy   String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
   @@unique([teamId, name])
   @@index([teamId])
@@ -565,50 +607,24 @@ model Tag {
 }
 
 model TagItem {
-  id       String  @id @default(cuid())
-  tagId    String
-  tag      Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
-  itemType TagType
+  id        String           @id @default(cuid())
+  tagId     String
+  tag       Tag              @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  itemType      TagType
 
   // tag can be linked to a link, document or dataroom
-  linkId     String?
-  link       Link?     @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  linkId String?
+  link   Link?   @relation(fields: [linkId], references: [id], onDelete: Cascade)
   documentId String?
   document   Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
   dataroomId String?
   dataroom   Dataroom? @relation(fields: [dataroomId], references: [id], onDelete: Cascade)
 
   taggedBy  String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
   @@index([tagId, linkId])
   @@index([tagId, documentId])
   @@index([tagId, dataroomId])
-}
-
-model ViewerInvitation {
-  id            String           @id @default(cuid())
-  viewerId      String
-  viewer        Viewer           @relation(fields: [viewerId], references: [id], onDelete: Cascade)
-  linkId        String
-  link          Link             @relation(fields: [linkId], references: [id], onDelete: Cascade)
-  groupId       String?
-  group         ViewerGroup?     @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  invitedBy     String
-  customMessage String?
-  sentAt        DateTime         @default(now())
-  status        InvitationStatus @default(SENT)
-
-  createdAt DateTime @default(now())
-
-  @@index([viewerId])
-  @@index([linkId])
-  @@index([groupId])
-}
-
-enum InvitationStatus {
-  SENT
-  FAILED
-  BOUNCED
 }

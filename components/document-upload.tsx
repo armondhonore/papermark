@@ -7,11 +7,7 @@ import { useTheme } from "next-themes";
 import { useDropzone } from "react-dropzone";
 import { toast } from "sonner";
 
-import {
-  FREE_PLAN_ACCEPTED_FILE_TYPES,
-  FULL_PLAN_ACCEPTED_FILE_TYPES,
-  SUPPORTED_DOCUMENT_MIME_TYPES,
-} from "@/lib/constants";
+import { SUPPORTED_DOCUMENT_MIME_TYPES } from "@/lib/constants";
 import { usePlan } from "@/lib/swr/use-billing";
 import useLimits from "@/lib/swr/use-limits";
 import { bytesToSize } from "@/lib/utils";
@@ -25,15 +21,9 @@ import { getPagesCount } from "@/lib/utils/get-page-number-count";
 export default function DocumentUpload({
   currentFile,
   setCurrentFile,
-  pdfOnly = false,
-  maxSizeBytes,
-  maxSizeErrorMessage,
 }: {
   currentFile: File | null;
   setCurrentFile: React.Dispatch<React.SetStateAction<File | null>>;
-  pdfOnly?: boolean;
-  maxSizeBytes?: number;
-  maxSizeErrorMessage?: string;
 }) {
   const router = useRouter();
   const { theme, systemTheme } = useTheme();
@@ -42,6 +32,7 @@ export default function DocumentUpload({
   const { isFree, isTrial } = usePlan();
   const { limits } = useLimits();
 
+  // Get file size limits
   const fileSizeLimits = useMemo(
     () =>
       getFileSizeLimits({
@@ -52,34 +43,61 @@ export default function DocumentUpload({
     [limits, isFree, isTrial],
   );
 
-  // When an explicit byte limit is provided (e.g. NDA signing template), use it instead of the plan limit.
-  const maxSizeMB =
-    typeof maxSizeBytes === "number"
-      ? Math.floor(maxSizeBytes / (1024 * 1024))
-      : undefined;
-
   const { getRootProps, getInputProps } = useDropzone({
-    accept: pdfOnly
-      ? { "application/pdf": [".pdf"] }
-      : isFree && !isTrial
-        ? FREE_PLAN_ACCEPTED_FILE_TYPES
-        : FULL_PLAN_ACCEPTED_FILE_TYPES,
+    accept:
+      isFree && !isTrial
+        ? {
+            "application/pdf": [], // ".pdf"
+            "application/vnd.ms-excel": [], // ".xls"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+              [], // ".xlsx"
+            "text/csv": [], // ".csv"
+            "application/vnd.oasis.opendocument.spreadsheet": [], // ".ods"
+            "image/png": [], // ".png"
+            "image/jpeg": [], // ".jpeg"
+            "image/jpg": [], // ".jpg"
+          }
+        : {
+            "application/pdf": [], // ".pdf"
+            "application/vnd.ms-excel": [], // ".xls"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+              [], // ".xlsx"
+            "application/vnd.ms-excel.sheet.macroEnabled.12": [".xlsm"], // ".xlsm"
+            "text/csv": [], // ".csv"
+            "application/vnd.oasis.opendocument.spreadsheet": [], // ".ods"
+            "application/vnd.ms-powerpoint": [], // ".ppt"
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+              [], // ".pptx"
+            "application/vnd.oasis.opendocument.presentation": [], // ".odp"
+            "application/msword": [], // ".doc"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+              [], // ".docx"
+            "application/vnd.oasis.opendocument.text": [], // ".odt"
+            "image/vnd.dwg": [".dwg"], // ".dwg"
+            "image/vnd.dxf": [".dxf"], // ".dxf"
+            "image/png": [], // ".png"
+            "image/jpeg": [], // ".jpeg"
+            "image/jpg": [], // ".jpg"
+            "application/zip": [], // ".zip"
+            "application/x-zip-compressed": [], // ".zip"
+            "video/mp4": [], // ".mp4"
+            "video/quicktime": [], // ".mov"
+            "video/x-msvideo": [], // ".avi"
+            "video/webm": [], // ".webm"
+            "video/ogg": [], // ".ogg"
+            "application/vnd.google-earth.kml+xml": [".kml"], // ".kml"
+            "application/vnd.google-earth.kmz": [".kmz"], // ".kmz"
+          },
     multiple: false,
     onDropAccepted: (acceptedFiles) => {
-      if (acceptedFiles.length === 0) {
-        return;
-      }
       const file = acceptedFiles[0];
       const fileType = file.type;
       const fileSizeLimitMB = getFileSizeLimit(fileType, fileSizeLimits); // in MB
-      const limitMB = maxSizeMB ?? fileSizeLimitMB; // displayed limit
-      const fileSizeLimit = maxSizeBytes ?? fileSizeLimitMB * 1024 * 1024; // in bytes
+      const fileSizeLimit = fileSizeLimitMB * 1024 * 1024; // in bytes
 
       if (file.size > fileSizeLimit) {
-        const message =
-          maxSizeErrorMessage ||
-          `File size too big for ${fileType} (max. ${limitMB} MB)`;
-        if (!maxSizeErrorMessage && isFree && !isTrial) {
+        const message = `File size too big for ${fileType} (max. ${fileSizeLimitMB} MB)`;
+        if (isFree && !isTrial) {
           toast.error(message, {
             description: "Upgrade to a paid plan to increase the limit",
             action: {
@@ -120,10 +138,9 @@ export default function DocumentUpload({
       const { errors, file } = fileRejections[0];
       let message;
       if (errors[0].code === "file-too-large") {
-        const limitMB = maxSizeMB ?? getFileSizeLimit(file.type, fileSizeLimits);
-        message =
-          maxSizeErrorMessage || `File size too big (max. ${limitMB} MB)`;
-        if (!maxSizeErrorMessage && isFree && !isTrial) {
+        const fileSizeLimitMB = getFileSizeLimit(file.type, fileSizeLimits);
+        message = `File size too big (max. ${fileSizeLimitMB} MB)`;
+        if (isFree && !isTrial) {
           toast.error(message, {
             description: "Upgrade to a paid plan to increase the limit",
             action: {
@@ -153,7 +170,6 @@ export default function DocumentUpload({
       }
       toast.error(message);
     },
-    maxSize: maxSizeBytes,
   });
 
   const imageBlobUrl = useMemo(
@@ -207,11 +223,9 @@ export default function DocumentUpload({
             <p className="text-xs leading-5 text-gray-500">
               {currentFile
                 ? "Replace file?"
-                : pdfOnly
-                  ? `Only *.pdf`
-                  : isFree && !isTrial
-                    ? `Only *.pdf, *.xls, *.xlsx, *.csv, *.tsv, *.ods, *.png, *.jpeg, *.jpg`
-                    : `Only *.pdf, *.pptx, *.docx, *.xlsx, *.xls, *.xlsm, *.csv, *.tsv, *.ods, *.ppt, *.odp, *.doc, *.odt, *.rtf, *.txt, *.md, *.dwg, *.dxf, *.png, *.jpg, *.jpeg, *.mp4, *.mov, *.avi, *.webm, *.ogg, *.log`}
+                : isFree && !isTrial
+                  ? `Only *.pdf, *.xls, *.xlsx, *.csv, *.ods, *.png, *.jpeg, *.jpg`
+                  : `Only *.pdf, *.pptx, *.docx, *.xlsx, *.xls, *.xlsm, *.csv, *.ods, *.ppt, *.odp, *.doc, *.odt, *.dwg, *.dxf, *.png, *.jpg, *.jpeg, *.mp4, *.mov, *.avi, *.webm, *.ogg`}
             </p>
           </div>
         </div>

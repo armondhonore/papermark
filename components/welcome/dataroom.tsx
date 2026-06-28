@@ -1,9 +1,11 @@
 import { useRouter } from "next/router";
 
+import { File as DocumentIcon, ServerIcon } from "lucide-react";
 import { motion } from "motion/react";
 
 import { STAGGER_CHILD_VARIANTS } from "@/lib/constants";
 
+import { DataroomTrialModal } from "../datarooms/dataroom-trial-modal";
 import { Button } from "../ui/button";
 
 export default function Dataroom() {
@@ -33,19 +35,18 @@ export default function Dataroom() {
         <p className="text-2xl font-bold tracking-tighter text-foreground">
           Papermark
         </p>
-        <h1 className="font-display max-w-xl text-3xl font-semibold transition-colors sm:text-4xl">
-          Get started with data rooms!
+        <h1 className="font-display max-w-md text-3xl font-semibold transition-colors sm:text-4xl">
+          Data rooms are here!
         </h1>
       </motion.div>
       <motion.div
         variants={STAGGER_CHILD_VARIANTS}
-        className="mx-auto mt-24 w-full overflow-hidden rounded-md bg-white [&>video]:[mask-image:radial-gradient(white,black)]"
+        className="mx-auto mt-24 w-full"
       >
         <video
           width="100%"
           id="video1"
-          className="block"
-          style={{ WebkitMaskImage: "radial-gradient(white, black)" }}
+          style={{ borderRadius: "6px" }}
           aria-hidden="true"
           playsInline
           autoPlay
@@ -54,7 +55,7 @@ export default function Dataroom() {
           controls
         >
           <source
-            src="https://img.papermarkassets.com/upload/file_EwRRKYFSgWcxPjGYF31QWe-Create-data-room-product-video-2.mp4"
+            src="https://assets.papermark.io/upload/file_A4qNV68jr3MAUayMNi3WmY-Data-Room-demo-2.mp4"
             type="video/mp4"
           />
         </video>
@@ -74,10 +75,10 @@ export default function Dataroom() {
             })
           }
         >
-          Get a Data Rooms Plus trial
+          Get a data room trial
         </Button>
         <span className="text-xs text-muted-foreground">
-          Data rooms are available on our Data Rooms Plus plan and higher.{" "}
+          Data rooms are available on our `Business` and `Data Rooms` plan.{" "}
           <br />
           You receive a 7-day trial.
         </span>

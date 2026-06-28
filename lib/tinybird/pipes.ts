@@ -35,20 +35,6 @@ export const getViewPageDuration = tb.buildPipe({
   }),
 });
 
-export const getViewCompletionStats = tb.buildPipe({
-  pipe: "get_view_completion_stats__v1",
-  parameters: z.object({
-    documentId: z.string(),
-    excludedViewIds: z.string().describe("Comma separated viewIds"),
-    since: z.number(),
-  }),
-  data: z.object({
-    viewId: z.string(),
-    versionNumber: z.number().int(),
-    pages_viewed: z.number(),
-  }),
-});
-
 export const getTotalDocumentDuration = tb.buildPipe({
   pipe: "get_total_document_duration__v1",
   parameters: z.object({
@@ -90,26 +76,12 @@ export const getTotalViewerDuration = tb.buildPipe({
   }),
 });
 
-export const getViewUserAgent_v2 = tb.buildPipe({
+export const getViewUserAgent = tb.buildPipe({
   pipe: "get_useragent_per_view__v2",
   parameters: z.object({
     documentId: z.string(),
     viewId: z.string(),
     since: z.number(),
-  }),
-  data: z.object({
-    country: z.string(),
-    city: z.string(),
-    browser: z.string(),
-    os: z.string(),
-    device: z.string(),
-  }),
-});
-
-export const getViewUserAgent = tb.buildPipe({
-  pipe: "get_useragent_per_view__v3",
-  parameters: z.object({
-    viewId: z.string(),
   }),
   data: z.object({
     country: z.string(),
@@ -210,31 +182,5 @@ export const getClickEventsByView = tb.buildPipe({
     page_number: z.string(),
     version_number: z.number(),
     href: z.string(),
-  }),
-});
-
-export const getDataroomViewDocumentStats = tb.buildPipe({
-  pipe: "get_dataroom_view_document_stats__v1",
-  parameters: z.object({
-    viewIds: z.string().describe("Comma separated viewIds"),
-  }),
-  data: z.object({
-    viewId: z.string(),
-    documentId: z.string(),
-    sum_duration: z.number(),
-    pages_viewed: z.number(),
-  }),
-});
-
-export const getTotalTeamDuration = tb.buildPipe({
-  pipe: "get_total_team_duration__v1",
-  parameters: z.object({
-    documentIds: z.string().describe("Comma separated documentIds"),
-    since: z.number(),
-    until: z.number(),
-  }),
-  data: z.object({
-    total_duration: z.number(),
-    unique_countries: z.array(z.string()),
   }),
 });

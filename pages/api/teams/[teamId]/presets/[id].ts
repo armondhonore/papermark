@@ -101,9 +101,6 @@ export default async function handle(
           watermarkConfig: validatedData.watermarkConfig
             ? JSON.stringify(validatedData.watermarkConfig)
             : Prisma.JsonNull,
-          customFields: validatedData.customFields
-            ? validatedData.customFields
-            : Prisma.JsonNull,
         },
       });
 

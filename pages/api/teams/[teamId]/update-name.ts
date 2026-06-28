@@ -4,7 +4,6 @@ import { getServerSession } from "next-auth";
 
 import prisma from "@/lib/prisma";
 import { CustomUser } from "@/lib/types";
-import { validateContent } from "@/lib/utils/sanitize-html";
 
 import { authOptions } from "../../auth/[...nextauth]";
 
@@ -13,7 +12,7 @@ export default async function handle(
   res: NextApiResponse,
 ) {
   if (req.method === "PATCH") {
-    // PATCH /api/teams/:teamId/update-name
+    // POST /api/teams/:teamId/update-name
     const session = await getServerSession(req, res, authOptions);
     if (!session) {
       return res.status(401).end("Unauthorized");
@@ -47,34 +46,13 @@ export default async function handle(
           .json("You are not permitted to perform this action");
       }
 
-      // Validate and sanitize the team name
-      let sanitizedName: string;
-      try {
-        sanitizedName = validateContent(req.body.name);
-      } catch (error) {
-        return res.status(400).json({
-          error: {
-            message: (error as Error).message || "Invalid team name",
-          },
-        });
-      }
-
-      // Check if name exceeds the maximum length (32 characters as per frontend)
-      if (sanitizedName.length > 32) {
-        return res.status(400).json({
-          error: {
-            message: "Team name cannot exceed 32 characters",
-          },
-        });
-      }
-
       // update name
       await prisma.team.update({
         where: {
           id: teamId,
         },
         data: {
-          name: sanitizedName,
+          name: req.body.name,
         },
       });
 
@@ -83,8 +61,8 @@ export default async function handle(
       return res.status(500).json((error as Error).message);
     }
   } else {
-    // We only allow PATCH requests
-    res.setHeader("Allow", "[PATCH]");
+    // We only allow POST requests
+    res.setHeader("Allow", "[POST]");
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 }

@@ -1,14 +1,7 @@
 import { z } from "zod";
 
 export const customFieldDataSchema = z.object({
-  type: z.enum([
-    "SHORT_TEXT",
-    "LONG_TEXT",
-    "NUMBER",
-    "PHONE_NUMBER",
-    "URL",
-    "CHECKBOX",
-  ]),
+  type: z.enum(["SHORT_TEXT", "LONG_TEXT", "NUMBER", "URL"]),
   identifier: z.string(),
   label: z.string(),
   placeholder: z.string().nullable().optional(),
@@ -30,17 +23,17 @@ export const watermarkConfigSchema = z
   .nullable();
 
 export const presetDataSchema = z.object({
-  name: z.string(),
   // Social Media Card
   enableCustomMetaTag: z.boolean(),
+  name: z.string(),
   metaFavicon: z.string().nullable(),
   metaImage: z.string().nullable(),
   metaTitle: z.string().nullable(),
   metaDescription: z.string().nullable(),
 
   // // Custom Fields
-  enableCustomFields: z.boolean().optional(),
-  customFields: z.array(customFieldDataSchema).nullable().optional(),
+  // enableCustomFields: z.boolean(),
+  // customFields: z.array(customFieldDataSchema).nullable(),
 
   // Watermark
   enableWatermark: z.boolean(),
@@ -54,24 +47,11 @@ export const presetDataSchema = z.object({
 
   // Email Protection
   emailProtected: z.boolean(),
-  emailAuthenticated: z.boolean().optional(),
-
-  // Additional Options
-  enableNotification: z.boolean(),
+  emailAuthenticated: z.boolean(),
   allowDownload: z.boolean().optional(),
   enablePassword: z.boolean(),
   password: z.string().nullable(),
   expiresAt: z.string().nullable(),
-  expiresIn: z.number().nullable().optional(),
-  enableScreenshotProtection: z.boolean().optional(),
-  enableConfidentialView: z.boolean().optional(),
-
-  // Agreement
-  enableAgreement: z.boolean().optional(),
-  agreementId: z.string().nullable().optional(),
-
-  // Banner
-  showBanner: z.boolean().optional(),
 });
 
 export type PresetDataSchema = z.infer<typeof presetDataSchema>;

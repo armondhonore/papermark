@@ -9,48 +9,10 @@ import {
   useDataroomFoldersTree,
 } from "@/lib/swr/use-dataroom";
 import { cn } from "@/lib/utils";
-import {
-  HIERARCHICAL_DISPLAY_STYLE,
-  useHierarchicalDisplayName,
-} from "@/lib/utils/hierarchical-display";
-import { sortByIndexThenName } from "@/lib/utils/sort-items-by-index-name";
 
 import { FileTree } from "@/components/ui/nextra-filetree";
 
 import { buildNestedFolderStructure } from "./utils";
-
-type MixedItem =
-  | (DataroomFolderWithDocuments & { itemType: "folder" })
-  | (DataroomFolderWithDocuments["documents"][0] & { itemType: "document" });
-
-const DocumentFileItem = memo(
-  ({
-    document,
-    dataroomId,
-    router,
-  }: {
-    document: DataroomFolderWithDocuments["documents"][0] & {
-      itemType: "document";
-    };
-    dataroomId: string;
-    router: any;
-  }) => {
-    const documentDisplayName = useHierarchicalDisplayName(
-      document.document.name,
-      document.hierarchicalIndex,
-    );
-
-    return (
-      <FileTree.File
-        name={documentDisplayName}
-        onToggle={() =>
-          router.push(`/datarooms/${dataroomId}/document/${document.id}`)
-        }
-      />
-    );
-  },
-);
-DocumentFileItem.displayName = "DocumentFileItem";
 
 const FolderComponent = memo(
   ({
@@ -62,50 +24,30 @@ const FolderComponent = memo(
   }) => {
     const router = useRouter();
 
-    // Get hierarchical display names
-    const folderDisplayName = useHierarchicalDisplayName(
-      folder.name,
-      folder.hierarchicalIndex,
+    // Memoize the rendering of the current folder's documents
+    const documents = useMemo(
+      () =>
+        folder.documents.map((doc) => (
+          <FileTree.File
+            key={doc.id}
+            name={doc.document.name}
+            onToggle={() => router.push(`/documents/${doc.document.id}`)}
+          />
+        )),
+      [folder.documents, dataroomId, router.query.name],
     );
 
-    const mixedItems = useMemo(() => {
-      const allItems: MixedItem[] = [
-        ...(folder.childFolders || []).map((f) => ({
-          ...f,
-          itemType: "folder" as const,
-        })),
-        ...(folder.documents || []).map((d) => ({
-          ...d,
-          itemType: "document" as const,
-        })),
-      ];
-
-      return sortByIndexThenName(allItems);
-    }, [folder.childFolders, folder.documents]);
-
-    const renderedItems = useMemo(
+    // Recursively render child folders if they exist
+    const childFolders = useMemo(
       () =>
-        mixedItems.map((item: MixedItem) => {
-          if (item.itemType === "folder") {
-            return (
-              <FolderComponent
-                key={item.id}
-                dataroomId={dataroomId}
-                folder={item}
-              />
-            );
-          } else {
-            return (
-              <DocumentFileItem
-                key={item.id}
-                document={item}
-                dataroomId={dataroomId}
-                router={router}
-              />
-            );
-          }
-        }),
-      [mixedItems, dataroomId, router],
+        folder.childFolders.map((childFolder) => (
+          <FolderComponent
+            key={childFolder.id}
+            dataroomId={dataroomId}
+            folder={childFolder}
+          />
+        )),
+      [folder.childFolders, dataroomId],
     );
 
     const isActive =
@@ -127,13 +69,14 @@ const FolderComponent = memo(
 
     return (
       <FileTree.Folder
-        name={folderDisplayName}
+        name={folder.name}
         key={folder.id}
         active={isActive}
         childActive={isChildActive}
         onToggle={handleFolderClick}
       >
-        {renderedItems}
+        {childFolders}
+        {documents}
       </FileTree.Folder>
     );
   },
@@ -158,7 +101,7 @@ const SidebarFolders = ({
     <FileTree>
       <SidebarLink
         href={`/datarooms/${dataroomId}/documents`}
-        label={"Home"}
+        label={"Dataroom Home"}
       />
       {nestedFolders.map((folder) => (
         <FolderComponent
@@ -187,8 +130,8 @@ export const SidebarLink = memo(
     return (
       <li
         className={cn(
-          "flex list-none rounded-md",
-          "text-foreground transition-all duration-200 ease-in-out",
+          "flex list-none",
+          "rounded-md text-foreground transition-all duration-200 ease-in-out",
           "hover:bg-gray-100 hover:shadow-sm hover:dark:bg-muted",
           "px-3 py-1.5 leading-6",
           isActive && "bg-gray-100 font-semibold dark:bg-muted",

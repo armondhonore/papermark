@@ -7,7 +7,6 @@ import {
   ViewerGroup,
   ViewerGroupAccessControls,
   ViewerGroupMembership,
-  ViewerInvitation,
 } from "@prisma/client";
 import useSWR from "swr";
 
@@ -15,40 +14,21 @@ import { fetcher } from "@/lib/utils";
 
 import { LinkWithViews } from "../types";
 
-export default function useDataroomGroups({
-  documentId,
-  folderId,
-  dataroomId: dataroomIdOverride,
-}: {
-  documentId?: string;
-  folderId?: string;
-  dataroomId?: string;
-} = {}) {
+export default function useDataroomGroups() {
   const teamInfo = useTeam();
   const router = useRouter();
 
-  const { id: queryDataroomId } = router.query as {
-    id?: string;
+  const isDataroom = router.pathname.includes("datarooms");
+  const { id } = router.query as {
+    id: string;
   };
-  const id = dataroomIdOverride ?? queryDataroomId;
-  const isDataroom =
-    router.pathname.includes("datarooms") || !!dataroomIdOverride;
 
   type ViewerGroupWithCount = ViewerGroup & {
-    accessControls: ViewerGroupAccessControls[];
     _count: {
       members: number;
       views: number;
     };
   };
-
-  // Build the optional scope query — at most one of documentId/folderId is
-  // expected (the API picks the first one it sees).
-  const scopeQuery = documentId
-    ? `?documentId=${documentId}`
-    : folderId
-      ? `?folderId=${folderId}`
-      : "";
 
   const {
     data: viewerGroups,
@@ -58,7 +38,7 @@ export default function useDataroomGroups({
     teamInfo?.currentTeam?.id &&
       id &&
       isDataroom &&
-      `/api/teams/${teamInfo?.currentTeam?.id}/datarooms/${id}/groups${scopeQuery}`,
+      `/api/teams/${teamInfo?.currentTeam?.id}/datarooms/${id}/groups`,
     fetcher,
     { dedupingInterval: 30000 },
   );
@@ -98,7 +78,7 @@ export function useDataroomGroupLinks() {
 }
 
 type ViewerGroupWithMembers = ViewerGroup & {
-  members: (ViewerGroupMembership & { viewer: Viewer & { invitations?: ViewerInvitation[] } })[];
+  members: (ViewerGroupMembership & { viewer: Viewer })[];
   accessControls: ViewerGroupAccessControls[];
 };
 
@@ -112,11 +92,7 @@ export function useDataroomGroup() {
   const teamInfo = useTeam();
   const teamId = teamInfo?.currentTeam?.id;
 
-  const {
-    data: viewerGroup,
-    error,
-    mutate,
-  } = useSWR<ViewerGroupWithMembers>(
+  const { data: viewerGroup, error } = useSWR<ViewerGroupWithMembers>(
     teamId &&
       id &&
       groupId &&
@@ -136,7 +112,6 @@ export function useDataroomGroup() {
     viewerGroupPermissions: viewerGroup?.accessControls ?? [],
     loading: !viewerGroup && !error,
     error,
-    mutate,
   };
 }
 

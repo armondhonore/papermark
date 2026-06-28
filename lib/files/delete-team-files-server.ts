@@ -1,7 +1,7 @@
 import { DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { del } from "@vercel/blob";
 
-import { getTeamS3ClientAndConfig } from "./aws-client";
+import { getS3Client } from "./aws-client";
 
 export type DeleteFilesOptions = {
   teamId: string;
@@ -25,12 +25,12 @@ const deleteAllFilesFromS3Server = async (teamId: string) => {
   // the teamId is the first prefix in the folder path
   const folderPath = teamId;
 
-  const { client, config } = await getTeamS3ClientAndConfig(teamId);
+  const client = getS3Client();
 
   try {
     // List all objects in the folder
     const listParams = {
-      Bucket: config.bucket,
+      Bucket: process.env.NEXT_PRIVATE_UPLOAD_BUCKET,
       Prefix: `${folderPath}/`, // Ensure this ends with a slash if it's a folder
     };
     const listedObjects = await client.send(
@@ -42,7 +42,7 @@ const deleteAllFilesFromS3Server = async (teamId: string) => {
 
     // Prepare delete parameters
     const deleteParams = {
-      Bucket: config.bucket,
+      Bucket: process.env.NEXT_PRIVATE_UPLOAD_BUCKET,
       Delete: {
         Objects: listedObjects.Contents.map((file) => ({ Key: file.Key })),
       },

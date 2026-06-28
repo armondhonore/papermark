@@ -3,10 +3,9 @@ import { NextApiRequest, NextApiResponse } from "next";
 import { authOptions } from "@/pages/api/auth/[...nextauth]";
 import { getServerSession } from "next-auth/next";
 
-import { enforceDocumentMemberScope } from "@/lib/api/rbac/guard";
 import { errorhandler } from "@/lib/errorHandler";
 import prisma from "@/lib/prisma";
-import { getViewUserAgent, getViewUserAgent_v2 } from "@/lib/tinybird";
+import { getViewUserAgent } from "@/lib/tinybird";
 import { CustomUser } from "@/lib/types";
 
 export default async function handle(
@@ -32,18 +31,6 @@ export default async function handle(
 
     const userId = (session.user as CustomUser).id;
 
-    // Scoped members may only read views for documents in their assigned rooms.
-    if (
-      await enforceDocumentMemberScope({
-        userId,
-        teamId,
-        documentId: docId,
-        res,
-      })
-    ) {
-      return;
-    }
-
     try {
       const team = await prisma.team.findUnique({
         where: {
@@ -68,28 +55,11 @@ export default async function handle(
         return res.status(403).end("Forbidden");
       }
 
-      let userAgent: {
-        rows?: number | undefined;
-        data: {
-          country: string;
-          city: string;
-          browser: string;
-          os: string;
-          device: string;
-        }[];
-      };
-
-      userAgent = await getViewUserAgent({
+      const userAgent = await getViewUserAgent({
+        documentId: docId,
         viewId: viewId,
+        since: 0,
       });
-
-      if (!userAgent || userAgent.rows === 0) {
-        userAgent = await getViewUserAgent_v2({
-          documentId: docId,
-          viewId: viewId,
-          since: 0,
-        });
-      }
 
       const userAgentData = userAgent.data[0];
       // Include country and city for business and datarooms plans

@@ -27,11 +27,6 @@ import {
 import { toast } from "sonner";
 import useSWR from "swr";
 
-import { usePlan } from "@/lib/swr/use-billing";
-import { cn, timeAgo } from "@/lib/utils";
-import { fetcher } from "@/lib/utils";
-import { downloadCSV } from "@/lib/utils/csv";
-
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -41,10 +36,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { TimestampTooltip } from "@/components/ui/timestamp-tooltip";
 import { DataTablePagination } from "@/components/visitors/data-table-pagination";
 
-import { UpgradeButton } from "../ui/upgrade-button";
+import { usePlan } from "@/lib/swr/use-billing";
+import { cn, timeAgo } from "@/lib/utils";
+import { fetcher } from "@/lib/utils";
+import { downloadCSV } from "@/lib/utils/csv";
+
+import { UpgradePlanModal } from "../billing/upgrade-plan-modal";
 
 interface Link {
   id: string;
@@ -214,20 +213,11 @@ const columns: ColumnDef<Link>[] = [
         </Button>
       );
     },
-    cell: ({ row }) =>
-      row.original.lastViewed ? (
-        <TimestampTooltip
-          timestamp={row.original.lastViewed}
-          side="right"
-          rows={["local", "utc", "unix"]}
-        >
-          <div className="select-none text-sm text-muted-foreground">
-            {timeAgo(row.original.lastViewed)}
-          </div>
-        </TimestampTooltip>
-      ) : (
-        <div className="text-sm text-muted-foreground">-</div>
-      ),
+    cell: ({ row }) => (
+      <div className="text-sm text-muted-foreground">
+        {row.original.lastViewed ? timeAgo(row.original.lastViewed) : "-"}
+      </div>
+    ),
   },
 ];
 
@@ -247,9 +237,7 @@ export default function LinksTable({
 
   const interval = router.query.interval || "7d";
   const { data: links, isLoading } = useSWR<Link[]>(
-    teamInfo?.currentTeam?.id
-      ? `/api/analytics?type=links&interval=${interval}&teamId=${teamInfo.currentTeam.id}${interval === "custom" ? `&startDate=${format(startDate, "MM-dd-yyyy")}&endDate=${format(endDate, "MM-dd-yyyy")}` : ""}`
-      : null,
+    `/api/analytics?type=links&interval=${interval}&teamId=${teamInfo?.currentTeam?.id}${interval === "custom" ? `&startDate=${format(startDate, "MM-dd-yyyy")}&endDate=${format(endDate, "MM-dd-yyyy")}` : ""}`,
     fetcher,
     {
       keepPreviousData: true,
@@ -295,15 +283,20 @@ export default function LinksTable({
   };
 
   const UpgradeOrExportButton = () => {
+    const [open, setOpen] = useState(false);
     if (isFree && !isTrial) {
       return (
-        <UpgradeButton
-          text="Export"
-          clickedPlan={PlanEnum.Pro}
-          trigger="dashboard_links_export"
-          variant="outline"
-          size="sm"
-        />
+        <>
+          <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+            Upgrade to Export
+          </Button>
+          <UpgradePlanModal
+            clickedPlan={PlanEnum.Pro}
+            trigger="dashboard_links_export"
+            open={open}
+            setOpen={setOpen}
+          />
+        </>
       );
     } else {
       return (
@@ -320,7 +313,7 @@ export default function LinksTable({
       <div className="flex justify-end">
         <UpgradeOrExportButton />
       </div>
-      <div className="overflow-x-auto rounded-xl border">
+      <div className="rounded-xl border">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
